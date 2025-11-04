@@ -44,17 +44,17 @@
 
 ### Tests for User Story 1 (required)
 
-- [ ] T012 [P] [US1] Write Vitest unit tests for countdown scheduling and RNG determinism in `tests/unit/simulation.spec.js`
-- [ ] T013 [P] [US1] Create Playwright scenario covering host flow from name entry to results in `tests/integration/race-flow.spec.js`
+- [X] T012 [P] [US1] Write Vitest unit tests for countdown scheduling and RNG determinism in `tests/unit/simulation.spec.js`
+- [X] T013 [P] [US1] Create Playwright scenario covering host flow from name entry to results in `tests/integration/race-flow.spec.js`
 
 ### Implementation for User Story 1
 
-- [ ] T014 [US1] Build host control form and race track markup in `index.html`
-- [ ] T015 [P] [US1] Style track lanes, countdown modal, and result popup to meet WCAG AA in `style.css`
-- [ ] T016 [US1] Render tracks and countdown overlay dynamically from player list in `app.js`
-- [ ] T017 [US1] Implement `requestAnimationFrame` tick loop progressing horses and enforcing 1 s cadence in `app.js`
-- [ ] T018 [P] [US1] Implement finish detection, ranking assignment, and result modal wiring in `app.js`
-- [ ] T019 [US1] Emit per-tick telemetry logs (base step, cheer boost, total distance) to console in `app.js`
+- [X] T014 [US1] Build host control form and race track markup in `index.html`
+- [X] T015 [P] [US1] Style track lanes, countdown modal, and result popup to meet WCAG AA in `style.css`
+- [X] T016 [US1] Render tracks and countdown overlay dynamically from player list in `app.js`
+- [X] T017 [US1] Implement `requestAnimationFrame` tick loop progressing horses and enforcing 1 s cadence in `app.js`
+- [X] T018 [P] [US1] Implement finish detection, ranking assignment, and result modal wiring in `app.js`
+- [X] T019 [US1] Emit per-tick telemetry logs (base step, cheer boost, total distance) to console in `app.js`
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 

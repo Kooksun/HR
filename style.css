@@ -117,6 +117,7 @@ body {
   height: 40px;
   border-radius: 999px;
   background: linear-gradient(90deg, rgba(255, 255, 255, 0.1), transparent 40%);
+  overflow: hidden;
 }
 
 .horse {
@@ -124,6 +125,7 @@ body {
   top: 50%;
   transform: translate(0, -50%) scaleX(-1);
   font-size: 2rem;
+  transition: transform 0.75s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .finish-line {
@@ -170,6 +172,17 @@ body {
   letter-spacing: 0.05em;
 }
 
+.results-content ol {
+  margin: 1rem 0 0;
+  padding-left: 1.5rem;
+}
+
+.results-content ol li {
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
 .results-content button {
   margin-top: 1.5rem;
   padding: 0.75rem 1.25rem;
@@ -179,6 +192,18 @@ body {
   color: #001220;
   font-weight: 600;
   cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.results-content button:hover,
+.results-content button:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(6, 214, 160, 0.35);
+}
+
+.results-content button:focus-visible {
+  outline: 3px solid #ffd166;
+  outline-offset: 2px;
 }
 
 .hidden {
@@ -205,5 +230,9 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .horse {
+    transition-duration: 0.01ms !important;
   }
 }

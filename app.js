@@ -24,6 +24,16 @@ const ClientMode = Object.freeze({
   SPECTATOR: "spectator",
 });
 
+const requestFrame =
+  typeof globalThis.requestAnimationFrame === "function"
+    ? (callback) => globalThis.requestAnimationFrame(callback)
+    : (callback) => globalThis.setTimeout(() => callback(Date.now()), 16);
+
+const cancelFrame =
+  typeof globalThis.cancelAnimationFrame === "function"
+    ? (frameId) => globalThis.cancelAnimationFrame(frameId)
+    : (frameId) => globalThis.clearTimeout(frameId);
+
 const selectors = {
   hostForm: document.querySelector("#host-form"),
   playerInput: document.querySelector("#player-names"),
@@ -44,6 +54,13 @@ const state = {
   database: null,
   rng: null,
   tick: 0,
+  raceStatus: "idle",
+  finishOrder: [],
+  countdownCancel: null,
+  animationFrameId: null,
+  accumulator: 0,
+  previousTimestamp: null,
+  seed: null,
 };
 
 function logSession(event, payload = {}) {
@@ -56,6 +73,76 @@ function logTick(tickNumber, payload = {}) {
 
 function logFirebase(event, payload = {}) {
   console.info(`[firebase] ${event}`, payload);
+}
+
+function disableHostControls() {
+  selectors.playerInput?.setAttribute("disabled", "true");
+  selectors.startButton?.setAttribute("disabled", "true");
+  selectors.hostForm?.setAttribute("aria-disabled", "true");
+}
+
+function enableHostControls() {
+  selectors.playerInput?.removeAttribute("disabled");
+  selectors.startButton?.removeAttribute("disabled");
+  selectors.hostForm?.removeAttribute("aria-disabled");
+}
+
+function cancelCountdown() {
+  if (typeof state.countdownCancel === "function") {
+    state.countdownCancel();
+    state.countdownCancel = null;
+  }
+}
+
+function stopRaceLoop() {
+  if (state.animationFrameId !== null) {
+    cancelFrame(state.animationFrameId);
+    state.animationFrameId = null;
+  }
+  state.accumulator = 0;
+  state.previousTimestamp = null;
+}
+
+function updateCountdownDisplay(value) {
+  if (!selectors.countdownValue) {
+    return;
+  }
+  const safeValue = Number.isFinite(value) ? Math.max(0, value) : 0;
+  selectors.countdownValue.textContent = String(safeValue);
+}
+
+function scheduleCountdown({ seconds = 5, onTick, onComplete } = {}) {
+  let remaining = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  const safeOnTick = typeof onTick === "function" ? onTick : () => {};
+  const safeOnComplete = typeof onComplete === "function" ? onComplete : () => {};
+  let cancelled = false;
+
+  safeOnTick(remaining);
+  logSession("countdown:tick", { value: remaining });
+
+  const intervalId = globalThis.setInterval(() => {
+    if (cancelled) {
+      globalThis.clearInterval(intervalId);
+      return;
+    }
+
+    remaining -= 1;
+    safeOnTick(remaining);
+    logSession("countdown:tick", { value: remaining });
+
+    if (remaining <= 0) {
+      globalThis.clearInterval(intervalId);
+      cancelled = true;
+      safeOnComplete();
+    }
+  }, 1_000);
+
+  return () => {
+    if (!cancelled) {
+      cancelled = true;
+      globalThis.clearInterval(intervalId);
+    }
+  };
 }
 
 function loadFirebaseConfig() {
@@ -144,12 +231,162 @@ async function cheerTransaction(playerId, sessionId = state.sessionId) {
   });
 }
 
+function createPlayerState(basePlayer, laneIndex) {
+  return {
+    ...basePlayer,
+    laneIndex,
+    distance: 0,
+    cheerCount: 0,
+    rank: null,
+    finished: false,
+    finishTick: null,
+    elements: {},
+  };
+}
+
+function updateHorsePosition(player) {
+  if (!player) {
+    return;
+  }
+  const horseEl = player.elements?.horse;
+  if (!horseEl) {
+    return;
+  }
+  const progressPercent = Math.min(player.distance * 100, 100);
+  horseEl.style.transform = `translate(${progressPercent}%, -50%) scaleX(-1)`;
+}
+
+function appendResultEntry(player) {
+  if (!selectors.resultsList) {
+    return;
+  }
+  const item = document.createElement("li");
+  item.textContent = `${player.rank}. ${player.name}`;
+  selectors.resultsList.appendChild(item);
+}
+
+function performRaceTick() {
+  if (typeof state.rng !== "function") {
+    state.rng = createRng(Date.now());
+  }
+
+  state.tick += 1;
+
+  const tickSummary = [];
+
+  state.players.forEach((player) => {
+    if (player.finished) {
+      tickSummary.push({
+        playerId: player.id,
+        distance: player.distance,
+        finished: true,
+        rank: player.rank,
+        cheerCount: player.cheerCount,
+        baseStep: 0,
+        cheerBoost: 0,
+        totalStep: 0,
+      });
+      return;
+    }
+
+    const baseStep = 0.2 + state.rng() * 0.6;
+    const cheerBoost = player.cheerCount * CHEER_BOOST_FACTOR;
+    const remainingDistance = Math.max(0, 1 - player.distance);
+    const totalStep = Math.min(baseStep + cheerBoost, remainingDistance);
+
+    player.distance = Math.min(1, player.distance + totalStep);
+    updateHorsePosition(player);
+
+    if (player.distance >= 1) {
+      player.finished = true;
+      player.finishTick = state.tick;
+      player.rank = state.finishOrder.length + 1;
+      state.finishOrder.push(player);
+      appendResultEntry(player);
+    }
+
+    tickSummary.push({
+      playerId: player.id,
+      baseStep,
+      cheerBoost,
+      totalStep,
+      distance: player.distance,
+      cheerCount: player.cheerCount,
+      finished: player.finished,
+      rank: player.rank,
+    });
+  });
+
+  logTick(state.tick, { players: tickSummary });
+
+  if (state.finishOrder.length === state.players.length) {
+    finishRace();
+  }
+}
+
+function finishRace() {
+  state.raceStatus = "finished";
+  stopRaceLoop();
+
+  selectors.resultsModal?.classList.remove("hidden");
+  enableHostControls();
+  selectors.resultsClose?.focus();
+
+  logSession("race:completed", {
+    finishOrder: state.finishOrder.map((player) => ({
+      playerId: player.id,
+      name: player.name,
+      rank: player.rank,
+      finishTick: player.finishTick,
+    })),
+  });
+}
+
+function startRaceLoop() {
+  if (state.players.length === 0) {
+    state.raceStatus = "idle";
+    enableHostControls();
+    return;
+  }
+
+  state.raceStatus = "running";
+  state.accumulator = 0;
+  state.previousTimestamp = null;
+
+  const step = (timestamp) => {
+    if (state.previousTimestamp === null) {
+      state.previousTimestamp = timestamp;
+    }
+
+    const delta = timestamp - state.previousTimestamp;
+    state.previousTimestamp = timestamp;
+    state.accumulator += delta;
+
+    while (state.accumulator >= TICK_MS && state.raceStatus === "running") {
+      state.accumulator -= TICK_MS;
+      performRaceTick();
+    }
+
+    if (state.raceStatus === "running") {
+      state.animationFrameId = requestFrame(step);
+    }
+  };
+
+  state.animationFrameId = requestFrame(step);
+}
+
 function renderInitialTracks() {
+  if (!selectors.tracksContainer) {
+    return;
+  }
+
   selectors.tracksContainer.innerHTML = "";
-  state.players.forEach((player, laneIndex) => {
+
+  state.players.forEach((player) => {
     const track = document.createElement("article");
     track.className = "track";
     track.dataset.playerId = player.id;
+    track.dataset.laneIndex = String(player.laneIndex);
 
     const name = document.createElement("div");
     name.className = "track-name";
@@ -157,12 +394,14 @@ function renderInitialTracks() {
 
     const lane = document.createElement("div");
     lane.className = "track-lane";
+    lane.style.height = `${LANE_CONFIG.laneHeightPx}px`;
 
     const horse = document.createElement("span");
     horse.className = "horse";
     horse.setAttribute("role", "img");
     horse.setAttribute("aria-label", `${player.name} horse`);
     horse.textContent = LANE_CONFIG.horseEmoji;
+    horse.style.transform = "translate(0%, -50%) scaleX(-1)";
     lane.appendChild(horse);
 
     const finish = document.createElement("div");
@@ -171,6 +410,14 @@ function renderInitialTracks() {
 
     track.append(name, lane, finish);
     selectors.tracksContainer.appendChild(track);
+
+    player.elements = {
+      track,
+      name,
+      lane,
+      horse,
+      finish,
+    };
   });
 }
 
@@ -197,6 +444,10 @@ function parsePlayerNames(rawValue) {
 
 function handleStart(event) {
   event.preventDefault();
+  if (state.raceStatus === "countdown" || state.raceStatus === "running") {
+    return;
+  }
+
   const rawValue = selectors.playerInput.value ?? "";
   const players = parsePlayerNames(rawValue);
   if (players.length < 2 || players.length > 10) {
@@ -204,17 +455,58 @@ function handleStart(event) {
     return;
   }
 
-  state.players = players;
+  cancelCountdown();
+  stopRaceLoop();
+
+  state.players = players.map((player, index) => createPlayerState(player, index));
+  state.finishOrder = [];
+  state.tick = 0;
+  state.seed =
+    typeof window.__RACE_SEED__ === "number" && Number.isFinite(window.__RACE_SEED__)
+      ? window.__RACE_SEED__
+      : Date.now();
+  state.rng = createRng(state.seed);
+  state.raceStatus = "countdown";
+
+  if (selectors.resultsList) {
+    selectors.resultsList.innerHTML = "";
+  }
+  selectors.resultsModal?.classList.add("hidden");
+
   renderInitialTracks();
-  logSession("host:players-registered", { players: players.map((p) => p.name) });
-  // Countdown, Firebase sync, and race logic implemented in later phases.
+  state.players.forEach(updateHorsePosition);
+
+  logSession("host:players-registered", {
+    players: players.map((p) => p.name),
+    seed: state.seed,
+  });
+
+  disableHostControls();
+  selectors.countdownModal?.classList.remove("hidden");
+  updateCountdownDisplay(5);
+
+  state.countdownCancel = scheduleCountdown({
+    seconds: 5,
+    onTick: updateCountdownDisplay,
+    onComplete: () => {
+      state.countdownCancel = null;
+      selectors.countdownModal?.classList.add("hidden");
+      logSession("countdown:complete");
+      logSession("race:start", { tickIntervalMs: TICK_MS, playerCount: state.players.length });
+      startRaceLoop();
+    },
+  });
 }
 
 function registerEventListeners() {
   selectors.hostForm?.addEventListener("submit", handleStart);
   selectors.resultsClose?.addEventListener("click", () => {
     selectors.resultsModal?.classList.add("hidden");
-    selectors.resultsList.innerHTML = "";
+    selectors.resultsList?.replaceChildren();
+    enableHostControls();
+    state.raceStatus = "idle";
+    logSession("results:closed");
+    selectors.playerInput?.focus();
   });
 }
 
@@ -253,5 +545,6 @@ export {
   logTick,
   parsePlayerNames,
   renderInitialTracks,
+  scheduleCountdown,
   state,
 };
