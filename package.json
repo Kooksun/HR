@@ -1,0 +1,32 @@
+{
+  "name": "horse-racing-arena",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Firebase-backed horse racing simulation webapp",
+  "type": "module",
+  "main": "app.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "dev": "http-server . -o /index.html -c-1",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "emulators": "firebase emulators:start --config ./firebase.json --import .firebase/emulator-data --export-on-exit",
+    "prepare": "playwright install --with-deps"
+  },
+  "keywords": [
+    "horse-racing",
+    "firebase",
+    "webapp"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "firebase-tools": "^13.22.0",
+    "http-server": "^14.1.1",
+    "vitest": "^1.6.0"
+  }
+}

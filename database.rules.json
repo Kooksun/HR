@@ -1,0 +1,26 @@
+{
+  "rules": {
+    "sessions": {
+      "$sessionId": {
+        ".read": true,
+        ".write": "auth != null",
+        "players": {
+          "$playerId": {
+            ".validate": "newData.hasChildren(['playerId', 'name', 'laneIndex', 'distance', 'cheerCount'])",
+            "cheerCount": {
+              ".read": true,
+              ".write": "auth != null",
+              ".validate": "newData.isNumber() && (data.val() == null || newData.val() >= data.val())"
+            },
+            "distance": {
+              ".validate": "newData.isNumber() && (data.val() == null || newData.val() >= data.val()) && newData.val() <= 1"
+            }
+          }
+        },
+        "status": {
+          ".validate": "newData.isString() && (newData.val() == 'pending' || newData.val() == 'countdown' || newData.val() == 'running' || newData.val() == 'finished')"
+        }
+      }
+    }
+  }
+}

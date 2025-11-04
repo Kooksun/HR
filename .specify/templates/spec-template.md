@@ -74,6 +74,15 @@
 
 - What happens when [boundary condition]?
 - How does system handle [error scenario]?
+- How is advantage resolved if simultaneous cheering events arrive?
+- What occurs when Firebase connectivity drops mid-race?
+
+### Firebase & Advantage Flow *(mandatory)*
+
+- **Cheering Payload**: `{ playerId, intensity, timestamp }`
+- **Advantage Formula**: Describe deterministic mapping from cheering intensity to race multiplier.
+- **Security Rules**: List Firebase rule snippets that gate cheering writes and session reads.
+- **Emulator Strategy**: Outline how the Firebase emulator reproduces real cheering traffic during tests.
 
 ## Requirements *(mandatory)*
 
@@ -84,11 +93,11 @@
 
 ### Functional Requirements
 
-- **FR-001**: System MUST [specific capability, e.g., "allow users to create accounts"]
-- **FR-002**: System MUST [specific capability, e.g., "validate email addresses"]  
-- **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]
-- **FR-004**: System MUST [data requirement, e.g., "persist user preferences"]
-- **FR-005**: System MUST [behavior, e.g., "log all security events"]
+- **FR-001**: System MUST render the full race UI from `index.html` using assets in `style.css` and `app.js`.
+- **FR-002**: System MUST apply cheering advantages only through Firebase events and document the multiplier math.
+- **FR-003**: Users MUST be able to trigger cheering via keyboard and pointer inputs with equal effectiveness.
+- **FR-004**: System MUST expose a deterministic seed hook that replays a race when provided with the same inputs.
+- **FR-005**: System MUST emit telemetry or logs that reconstruct final standings and cheering deltas.
 
 *Example of marking unclear requirements:*
 

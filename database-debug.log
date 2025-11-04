@@ -1,0 +1,4 @@
+16:42:44.654 [NamespaceSystem-akka.actor.default-dispatcher-5] INFO akka.event.slf4j.Slf4jLogger - Slf4jLogger started
+16:42:44.715 [main] INFO com.firebase.server.forge.App$ - Listening at 127.0.0.1:9000
+16:42:44.999 [NamespaceSystem-akka.actor.default-dispatcher-5] INFO com.firebase.core.namespace.NamespaceActor - kooksun-hr-default-rtdb successfully activated FBKV (SurveyIdle(0)) wait: 46ms, init: 0ms
+16:42:45.036 [NamespaceSystem-blocking-namespace-operation-dispatcher-7] INFO com.firebase.core.namespace.StateManager - Namespace kooksun-hr-default-rtdb status Active to Active

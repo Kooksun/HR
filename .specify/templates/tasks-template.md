@@ -62,12 +62,12 @@ description: "Task list template for feature implementation"
 
 Examples of foundational tasks (adjust based on your project):
 
-- [ ] T004 Setup database schema and migrations framework
-- [ ] T005 [P] Implement authentication/authorization framework
-- [ ] T006 [P] Setup API routing and middleware structure
-- [ ] T007 Create base models/entities that all stories depend on
-- [ ] T008 Configure error handling and logging infrastructure
-- [ ] T009 Setup environment configuration management
+- [ ] T004 Configure Firebase project, security rules, and local emulator suite
+- [ ] T005 [P] Implement cheering event data model (`{ playerId, intensity, timestamp }`)
+- [ ] T006 [P] Wire base simulation engine with seedable randomness hook in `app.js`
+- [ ] T007 Create telemetry overlay/console tracing helpers for race timelines
+- [ ] T008 Document static asset structure (index/style/app) and verify no bundler step
+- [ ] T009 Setup environment configuration management (`.env.local`, emulator settings)
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -83,16 +83,16 @@ Examples of foundational tasks (adjust based on your project):
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T010 [P] [US1] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T011 [P] [US1] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T010 [P] [US1] Firebase emulator test ensuring cheering updates publish expected multiplier
+- [ ] T011 [P] [US1] DOM integration test that replays a seeded race consistently
 
 ### Implementation for User Story 1
 
-- [ ] T012 [P] [US1] Create [Entity1] model in src/models/[entity1].py
-- [ ] T013 [P] [US1] Create [Entity2] model in src/models/[entity2].py
-- [ ] T014 [US1] Implement [Service] in src/services/[service].py (depends on T012, T013)
-- [ ] T015 [US1] Implement [endpoint/feature] in src/[location]/[file].py
-- [ ] T016 [US1] Add validation and error handling
+- [ ] T012 [P] [US1] Implement cheering controls in `index.html` with ARIA labels
+- [ ] T013 [P] [US1] Style accessible race track indicators in `style.css`
+- [ ] T014 [US1] Implement seeded simulation loop and Firebase advantage merge in `app.js`
+- [ ] T015 [US1] Render live telemetry overlay or console trace for race progress
+- [ ] T016 [US1] Add validation for cheering intensity bounds and rate limits
 - [ ] T017 [US1] Add logging for user story 1 operations
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
@@ -107,14 +107,14 @@ Examples of foundational tasks (adjust based on your project):
 
 ### Tests for User Story 2 (OPTIONAL - only if tests requested) ⚠️
 
-- [ ] T018 [P] [US2] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T019 [P] [US2] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T018 [P] [US2] Firebase rules test preventing unauthorized cheering writes
+- [ ] T019 [P] [US2] Accessibility audit script verifying keyboard cheering flow
 
 ### Implementation for User Story 2
 
-- [ ] T020 [P] [US2] Create [Entity] model in src/models/[entity].py
-- [ ] T021 [US2] Implement [Service] in src/services/[service].py
-- [ ] T022 [US2] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T020 [P] [US2] Extend Firebase schema with session leaderboards
+- [ ] T021 [US2] Implement cheering cooldown logic in `app.js`
+- [ ] T022 [US2] Update UI to broadcast leader changes with ARIA live regions
 - [ ] T023 [US2] Integrate with User Story 1 components (if needed)
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently

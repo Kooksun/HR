@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Horse Racing Arena</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="control-bar">
+      <h1>Horse Racing Arena</h1>
+      <form id="host-form" class="host-form" autocomplete="off">
+        <label for="player-names" class="visually-hidden"
+          >Player names (comma separated)</label
+        >
+        <input
+          id="player-names"
+          name="player-names"
+          type="text"
+          placeholder="Comma-separated player names"
+          required
+        />
+        <button type="submit" id="start-button">Start Race</button>
+      </form>
+    </header>
+
+    <main id="arena" class="arena">
+      <section id="tracks" class="tracks" aria-live="polite">
+        <!-- Tracks rendered by app.js -->
+      </section>
+    </main>
+
+    <div id="countdown" class="countdown hidden" role="dialog" aria-live="assertive" aria-modal="true">
+      <p class="countdown-value">5</p>
+    </div>
+
+    <div id="results-modal" class="results-modal hidden" role="dialog" aria-modal="true" aria-live="assertive">
+      <div class="results-content">
+        <h2>Race Results</h2>
+        <ol id="results-list"></ol>
+        <button id="results-close">Close</button>
+      </div>
+    </div>
+
+    <!-- firebase-config.js is gitignored; populate window.__FIREBASE_CONFIG__ before app.js loads -->
+    <script src="./firebase-config.js"></script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

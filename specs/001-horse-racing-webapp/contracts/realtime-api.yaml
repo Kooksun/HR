@@ -1,0 +1,175 @@
+openapi: 3.1.0
+info:
+  title: Horse Racing Webapp Realtime API
+  version: 0.1.0
+servers:
+  - url: https://kooksun-hr-default-rtdb.firebaseio.com
+    description: Firebase Realtime Database REST endpoint
+paths:
+  /sessions/{sessionId}.json:
+    put:
+      summary: Initialise or replace a session document
+      operationId: initSession
+      tags: [Host]
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Session'
+      responses:
+        '200':
+          description: Session initialised
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+    delete:
+      summary: Delete a session and all nested players
+      operationId: deleteSession
+      tags: [Host]
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '200':
+          description: Session deleted
+  /sessions/{sessionId}/players/{playerId}.json:
+    patch:
+      summary: Update player state (host)
+      operationId: updatePlayer
+      tags: [Host]
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+        - $ref: '#/components/parameters/playerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlayerPartial'
+      responses:
+        '200':
+          description: Player state updated
+  /sessions/{sessionId}/players/{playerId}/cheerCount.json:
+    post:
+      summary: Increment cheer counter (spectator)
+      operationId: incrementCheer
+      tags: [Spectator]
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+        - $ref: '#/components/parameters/playerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheerIncrement'
+      responses:
+        '200':
+          description: Cheer count incremented
+          content:
+            application/json:
+              schema:
+                type: integer
+                description: Updated cheer count
+components:
+  parameters:
+    sessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: host-20251104-1
+    playerId:
+      name: playerId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: luna-horse
+  schemas:
+    Session:
+      type: object
+      required: [sessionId, status, createdAt, seed, tick, players]
+      properties:
+        sessionId:
+          type: string
+        status:
+          type: string
+          enum: [pending, countdown, running, finished]
+        createdAt:
+          type: string
+          format: date-time
+        seed:
+          type: integer
+          description: Deterministic RNG seed
+        tick:
+          type: integer
+          minimum: 0
+        finishOrder:
+          type: array
+          items:
+            type: string
+        players:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/Player'
+    Player:
+      type: object
+      required: [playerId, name, laneIndex, distance, cheerCount]
+      properties:
+        playerId:
+          type: string
+        name:
+          type: string
+          minLength: 2
+          maxLength: 20
+        laneIndex:
+          type: integer
+          minimum: 0
+        distance:
+          type: number
+          minimum: 0
+          maximum: 1
+        cheerCount:
+          type: integer
+          minimum: 0
+        finishTime:
+          type: integer
+          nullable: true
+          description: Milliseconds from race start
+        rank:
+          type: integer
+          nullable: true
+          minimum: 1
+        lastCheerAt:
+          type: string
+          format: date-time
+          nullable: true
+    PlayerPartial:
+      type: object
+      description: Host-driven player updates during race ticks
+      properties:
+        distance:
+          type: number
+          minimum: 0
+          maximum: 1
+        cheerCount:
+          type: integer
+          minimum: 0
+        finishTime:
+          type: integer
+          nullable: true
+        rank:
+          type: integer
+          nullable: true
+    CheerIncrement:
+      type: object
+      required: [increment]
+      properties:
+        increment:
+          type: integer
+          enum: [1]

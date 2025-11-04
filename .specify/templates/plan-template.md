@@ -31,7 +31,11 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- Single-page asset plan confirmed: no additional build artifacts or entrypoints beyond `index.html`, `style.css`, `app.js`.
+- Simulation design documents a seedable randomness strategy and exposes formulas for Firebase-driven advantages.
+- Firebase data model and security rules drafted, plus emulator usage defined for local testing.
+- Accessibility acceptance criteria captured (keyboard cheering controls, WCAG AA contrast, synchronized audio/animation timing).
+- Test and telemetry approach proves race timelines, Firebase events, and DOM updates before implementation starts.
 
 ## Project Structure
 
