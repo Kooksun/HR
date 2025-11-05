@@ -24,7 +24,7 @@ const CHEER_BOOST_FACTOR = 0.05;
 const LANE_CONFIG = Object.freeze({
   horseEmoji: "🏇",
   finishEmoji: "🏁",
-  laneHeightPx: 64,
+  laneHeightPx: 32,
 });
 const SESSION_PATH = "sessions";
 const ClientMode = Object.freeze({
@@ -853,7 +853,8 @@ function updateHorsePosition(player) {
     return;
   }
   const progressPercent = Math.min(player.distance * 100, 100);
-  horseEl.style.transform = `translate(${progressPercent}%, -50%) scaleX(-1)`;
+  horseEl.style.left = `${progressPercent}%`;
+  horseEl.style.transform = `translateX(-50%) translateY(-50%) scaleX(-1)`;
 }
 
 function appendResultEntry(player) {
@@ -861,7 +862,7 @@ function appendResultEntry(player) {
     return;
   }
   const item = document.createElement("li");
-  item.textContent = `${player.rank}. ${player.name}`;
+  item.textContent = `${player.rank}등 ${player.name}`;
   selectors.resultsList.appendChild(item);
 }
 
@@ -889,7 +890,7 @@ function performRaceTick() {
       return;
     }
 
-    const baseStep = 0.2 + state.rng() * 0.6;
+    const baseStep = 0.02 + state.rng() * 0.06;
     const cheerBoost = player.cheerCount * CHEER_BOOST_FACTOR;
     const remainingDistance = Math.max(0, 1 - player.distance);
     const totalStep = Math.min(baseStep + cheerBoost, remainingDistance);
@@ -903,6 +904,10 @@ function performRaceTick() {
       player.rank = state.finishOrder.length + 1;
       state.finishOrder.push(player);
       appendResultEntry(player);
+      if (player.elements.rankDisplay) {
+        player.elements.rankDisplay.textContent = `${player.rank}등`;
+        player.elements.rankDisplay.style.display = "block";
+      }
     }
 
     tickSummary.push({
@@ -995,70 +1000,160 @@ function startRaceLoop() {
 }
 
 function renderInitialTracks() {
+
   if (!selectors.tracksContainer) {
+
     return;
+
   }
+
+
 
   selectors.tracksContainer.innerHTML = "";
 
+
+
   state.players.forEach((player) => {
+
     const track = document.createElement("article");
+
     track.className = "track";
+
     track.dataset.playerId = player.id;
+
     track.dataset.laneIndex = String(player.laneIndex);
 
+
+
     const name = document.createElement("div");
+
     name.className = "track-name";
-    name.textContent = player.name;
+
+
+
+    const nameSpan = document.createElement("span");
+
+    nameSpan.textContent = player.name;
+
+
+
+    const cheerCountDisplay = document.createElement("span");
+
+    cheerCountDisplay.className = "cheer-count-display";
+
+    cheerCountDisplay.textContent = ` (🎉 ${player.cheerCount ?? 0})`;
+
+
+
+    name.append(nameSpan, cheerCountDisplay);
+
+
 
     const lane = document.createElement("div");
+
     lane.className = "track-lane";
+
     lane.style.height = `${LANE_CONFIG.laneHeightPx}px`;
 
+
+
     const horse = document.createElement("span");
+
     horse.className = "horse";
+
     horse.setAttribute("role", "img");
+
     horse.setAttribute("aria-label", `${player.name} horse`);
+
     horse.textContent = LANE_CONFIG.horseEmoji;
-    horse.style.transform = "translate(0%, -50%) scaleX(-1)";
+
+    horse.style.left = "0%";
+
+    horse.style.transform = "translateY(-50%) scaleX(-1)";
+
+    horse.style.transition =
+
+      "transform 0.75s cubic-bezier(0.4, 0, 0.2, 1), left 0.75s cubic-bezier(0.4, 0, 0.2, 1)";
+
     lane.appendChild(horse);
 
+
+
     const finish = document.createElement("div");
+
     finish.className = "finish-line";
+
     finish.textContent = LANE_CONFIG.finishEmoji;
 
+
+
+    const rankDisplay = document.createElement("div");
+
+    rankDisplay.className = "rank-display";
+
+    rankDisplay.textContent = ""; // Initially empty
+
+    lane.appendChild(rankDisplay);
+
+
+
     track.append(name, lane, finish);
+
     selectors.tracksContainer.appendChild(track);
 
+
+
     player.elements = {
+
       track,
+
       name,
+
       lane,
+
       horse,
+
       finish,
+
+      rankDisplay,
+
+      cheerCountDisplay,
+
     };
+
   });
+
+}
+
+
+
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
 }
 
 function parsePlayerNames(rawValue) {
   const seen = new Set();
-  return rawValue
+  const players = [];
+  rawValue
     .split(",")
     .map((name) => name.trim())
     .filter(Boolean)
-    .filter((name) => {
-      const key = name.toLowerCase();
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    })
-    .map((name, index) => ({
-      id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+    .forEach((name) => {
+      const id = name.toLowerCase().replace(/[^a-z0-9\uac00-\ud7a3]+/g, "-");
+      if (!seen.has(id)) {
+        seen.add(id);
+        players.push({
+          id,
       name,
-      laneIndex: index,
-    }));
+          laneIndex: players.length,
+        });
+      }
+    });
+  return players;
 }
 
 async function handleStart(event) {
@@ -1068,9 +1163,10 @@ async function handleStart(event) {
   }
 
   const rawValue = selectors.playerInput.value ?? "";
-  const players = parsePlayerNames(rawValue);
-  if (players.length < 2 || players.length > 10) {
-    window.alert("Enter between 2 and 10 unique player names (comma separated).");
+  let players = parsePlayerNames(rawValue);
+  shuffleArray(players);
+  if (players.length < 2 || players.length > 8) {
+    window.alert("Enter between 2 and 8 unique player names (comma separated).");
     return;
   }
 

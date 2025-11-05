@@ -12,7 +12,7 @@ pnpm-debug.log*
 .env
 .env.*
 .env.local
-firebase-config.js
+
 .codex/
 
 # Firebase emulator data and logs
