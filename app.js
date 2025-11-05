@@ -1,9 +1,17 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
 import {
+  getAuth,
+  signInAnonymously,
+} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+import {
   getDatabase,
   get,
   ref,
   runTransaction,
+  set,
+  update,
+  onValue,
+  remove,
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
 /**
@@ -23,6 +31,7 @@ const ClientMode = Object.freeze({
   HOST: "host",
   SPECTATOR: "spectator",
 });
+const LOCAL_SESSION_KEY = "horse-racing-session";
 
 const requestFrame =
   typeof globalThis.requestAnimationFrame === "function"
@@ -44,6 +53,9 @@ const selectors = {
   resultsModal: document.querySelector("#results-modal"),
   resultsList: document.querySelector("#results-list"),
   resultsClose: document.querySelector("#results-close"),
+  spectatorPanel: document.querySelector("#spectator-panel"),
+  spectatorStatus: document.querySelector("#spectator-status"),
+  cheerButtons: document.querySelector("#cheer-buttons"),
 };
 
 const state = {
@@ -52,6 +64,7 @@ const state = {
   sessionId: null,
   firebaseApp: null,
   database: null,
+  auth: null,
   rng: null,
   tick: 0,
   raceStatus: "idle",
@@ -61,7 +74,20 @@ const state = {
   accumulator: 0,
   previousTimestamp: null,
   seed: null,
+  sessionRef: null,
+  playersUnsubscribe: null,
+  cheerButtonRefs: new Map(),
+  offlineMode: false,
+  bus: null,
+  sessionBroadcastTimer: null,
+  forcedMode: null,
+  localCachePollTimer: null,
+  cleanupPromise: null,
 };
+
+if (typeof window !== "undefined") {
+  window.__APP_STATE__ = state;
+}
 
 function logSession(event, payload = {}) {
   console.info(`[session] ${event}`, payload);
@@ -73,6 +99,578 @@ function logTick(tickNumber, payload = {}) {
 
 function logFirebase(event, payload = {}) {
   console.info(`[firebase] ${event}`, payload);
+}
+
+function createSessionId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `session-${Date.now()}-${Math.floor(Math.random() * 1_000)}`;
+}
+
+async function ensureAnonymousAuth(firebaseApp) {
+  if (!firebaseApp) {
+    throw new Error("Firebase app not initialised");
+  }
+
+  if (state.auth?.currentUser) {
+    return state.auth.currentUser;
+  }
+
+  const auth = getAuth(firebaseApp);
+  state.auth = auth;
+  try {
+    const cred = await signInAnonymously(auth);
+    logFirebase("auth:anonymous", { uid: cred.user?.uid ?? "unknown" });
+    return cred.user;
+  } catch (error) {
+    logFirebase("auth:error", { message: error.message });
+    throw error;
+  }
+}
+
+function setupBroadcastChannel() {
+  if (state.bus || typeof BroadcastChannel === "undefined") {
+    return;
+  }
+
+  const channel = new BroadcastChannel("horse-racing-arena");
+  channel.onmessage = handleBusMessage;
+  state.bus = channel;
+}
+
+function publishBus(type, payload = {}) {
+  if (!state.bus) {
+    return;
+  }
+  try {
+    state.bus.postMessage({ type, payload });
+  } catch (error) {
+    logSession("bus:error", { message: error.message, type });
+  }
+}
+
+function getSessionBroadcastPayload() {
+  return {
+    origin: "host",
+    sessionId: state.sessionId,
+    players: state.players.map((player) => ({
+      id: player.id,
+      name: player.name,
+      laneIndex: player.laneIndex,
+      cheerCount: player.cheerCount,
+    })),
+  };
+}
+
+function startSessionBroadcastLoop() {
+  stopSessionBroadcastLoop();
+  if (!state.bus) {
+    return;
+  }
+  let iterations = 0;
+  state.sessionBroadcastTimer = globalThis.setInterval(() => {
+    iterations += 1;
+    publishBus("session-created", getSessionBroadcastPayload());
+    if (iterations >= 5) {
+      stopSessionBroadcastLoop();
+    }
+  }, 1_000);
+}
+
+function stopSessionBroadcastLoop() {
+  if (state.sessionBroadcastTimer) {
+    globalThis.clearInterval(state.sessionBroadcastTimer);
+    state.sessionBroadcastTimer = null;
+  }
+}
+
+function persistSessionCache(owner = "host") {
+  if (typeof localStorage === "undefined" || !state.sessionId) {
+    return;
+  }
+  try {
+    const payload = {
+      owner,
+      sessionId: state.sessionId,
+      players: state.players.map((player) => ({
+        id: player.id,
+        name: player.name,
+        laneIndex: player.laneIndex,
+        cheerCount: player.cheerCount,
+      })),
+      updatedAt: Date.now(),
+    };
+    localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(payload));
+  } catch (error) {
+    logSession("cache:error", { message: error.message });
+  }
+}
+
+function loadSessionCache() {
+  if (typeof localStorage === "undefined") {
+    return null;
+  }
+  try {
+    const raw = localStorage.getItem(LOCAL_SESSION_KEY);
+    if (!raw) {
+      return null;
+    }
+    return JSON.parse(raw);
+  } catch (error) {
+    logSession("cache:load-error", { message: error.message });
+    return null;
+  }
+}
+
+function clearSessionCache() {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    localStorage.removeItem(LOCAL_SESSION_KEY);
+  } catch (error) {
+    logSession("cache:clear-error", { message: error.message });
+  }
+}
+
+function playersArrayToSnapshot(playersArray = []) {
+  return playersArray.reduce((acc, player, index) => {
+    if (!player?.id) {
+      return acc;
+    }
+    acc[player.id] = {
+      name: player.name ?? player.id,
+      laneIndex: player.laneIndex ?? index,
+      cheerCount: player.cheerCount ?? 0,
+    };
+    return acc;
+  }, {});
+}
+
+function startLocalCachePoll() {
+  stopLocalCachePoll();
+  state.localCachePollTimer = globalThis.setInterval(() => {
+    const cached = loadSessionCache();
+    if (cached?.sessionId) {
+      enterSpectatorMode(cached.sessionId, {
+        players: playersArrayToSnapshot(cached.players),
+      });
+      stopLocalCachePoll();
+    }
+  }, 1_000);
+}
+
+function stopLocalCachePoll() {
+  if (state.localCachePollTimer) {
+    globalThis.clearInterval(state.localCachePollTimer);
+    state.localCachePollTimer = null;
+  }
+}
+
+function handleBusMessage(event) {
+  const data = event?.data;
+  if (!data || typeof data !== "object") {
+    return;
+  }
+
+  const { type, payload } = data;
+  switch (type) {
+    case "session-created": {
+      const { sessionId, players, origin } = payload ?? {};
+      if (!sessionId || !players) {
+        return;
+      }
+      if (origin === "host" && state.sessionId === sessionId) {
+        return;
+      }
+      const playersSnapshot = {};
+      players.forEach((player, index) => {
+        playersSnapshot[player.id] = {
+          name: player.name,
+          laneIndex: player.laneIndex ?? index,
+          cheerCount: player.cheerCount ?? 0,
+        };
+      });
+      enterSpectatorMode(sessionId, { players: playersSnapshot });
+      break;
+    }
+    case "cheer": {
+      const { sessionId, playerId, delta = 1 } = payload ?? {};
+      if (!sessionId || !playerId || sessionId !== state.sessionId) {
+        return;
+      }
+      if (state.mode === ClientMode.HOST && !state.offlineMode) {
+        // Host will sync via Firebase; no need to double-apply.
+        return;
+      }
+      const target = state.players.find((player) => player.id === playerId);
+      if (!target) {
+        return;
+      }
+      target.cheerCount = (target.cheerCount ?? 0) + delta;
+      updateSpectatorCheerCounts();
+      break;
+    }
+    case "session-finished": {
+      const { sessionId } = payload ?? {};
+      if (state.mode === ClientMode.SPECTATOR && sessionId === state.sessionId) {
+        setSpectatorStatus("Race finished. Thanks for cheering!");
+      }
+      break;
+    }
+    default:
+  }
+}
+
+function setSpectatorStatus(message) {
+  if (selectors.spectatorStatus) {
+    selectors.spectatorStatus.textContent = message;
+  }
+}
+
+function hideElement(element) {
+  element?.classList.add("hidden");
+}
+
+function showElement(element) {
+  element?.classList.remove("hidden");
+}
+
+function clearPlayersSubscription() {
+  if (typeof state.playersUnsubscribe === "function") {
+    state.playersUnsubscribe();
+    state.playersUnsubscribe = null;
+  }
+}
+
+function hydratePlayersFromSnapshot(snapshotValue) {
+  if (!snapshotValue) {
+    return;
+  }
+
+  const playersList = Array.isArray(state.players) ? [...state.players] : [];
+  const mapped = new Map(playersList.map((player) => [player.id, player]));
+
+  Object.entries(snapshotValue).forEach(([playerId, remote]) => {
+    const existing = mapped.get(playerId);
+    if (existing) {
+      existing.cheerCount = remote.cheerCount ?? existing.cheerCount ?? 0;
+    } else {
+      mapped.set(
+        playerId,
+        createPlayerState(
+          {
+            id: playerId,
+            name: remote.name ?? playerId,
+          },
+          remote.laneIndex ?? playersList.length,
+        ),
+      );
+    }
+  });
+
+  state.players = Array.from(mapped.values()).sort((a, b) => a.laneIndex - b.laneIndex);
+}
+
+function subscribeToPlayers(sessionId) {
+  if (!state.database || !sessionId) {
+    return;
+  }
+
+  clearPlayersSubscription();
+
+  const playersRef = ref(state.database, `${SESSION_PATH}/${sessionId}/players`);
+  state.playersUnsubscribe = onValue(
+    playersRef,
+    (snapshot) => {
+      hydratePlayersFromSnapshot(snapshot.val());
+      if (state.mode === ClientMode.SPECTATOR) {
+        renderSpectatorButtons();
+      } else {
+        updateSpectatorCheerCounts();
+      }
+    },
+    (error) => {
+      logFirebase("players:subscription-error", { message: error.message });
+    },
+  );
+}
+
+function updateSpectatorCheerCounts() {
+  if (!state.cheerButtonRefs?.size) {
+    return;
+  }
+  state.players.forEach((player) => {
+    const buttonElements = state.cheerButtonRefs.get(player.id);
+    if (buttonElements) {
+      const { button, countLabel } = buttonElements;
+      if (button) {
+        button.disabled = button.dataset.cooldown === "true";
+      }
+      if (countLabel) {
+        countLabel.textContent = String(player.cheerCount ?? 0);
+      }
+    }
+  });
+}
+
+function renderSpectatorButtons() {
+  if (!selectors.cheerButtons) {
+    return;
+  }
+
+  selectors.cheerButtons.replaceChildren();
+  state.cheerButtonRefs.clear();
+
+  state.players.forEach((player) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cheer-button";
+    button.dataset.role = "cheer-button";
+    button.dataset.playerId = player.id;
+    button.setAttribute("aria-label", `Cheer for ${player.name}`);
+
+    const label = document.createElement("span");
+    label.textContent = player.name;
+
+    const count = document.createElement("span");
+    count.className = "cheer-count";
+    count.textContent = String(player.cheerCount ?? 0);
+
+    button.append(label, count);
+    button.addEventListener("click", () => handleCheer(player.id, button));
+
+    selectors.cheerButtons.appendChild(button);
+    state.cheerButtonRefs.set(player.id, { button, countLabel: count });
+  });
+
+  updateSpectatorCheerCounts();
+}
+
+function enterSpectatorMode(sessionId, sessionData = {}) {
+  stopLocalCachePoll();
+  state.mode = ClientMode.SPECTATOR;
+  state.sessionId = sessionId;
+
+  const playersSnapshot = sessionData.players ?? {};
+  state.players = Object.entries(playersSnapshot).map(([playerId, payload], index) =>
+    createPlayerState(
+      {
+        id: playerId,
+        name: payload.name ?? playerId,
+      },
+      payload.laneIndex ?? index,
+    ),
+  );
+  state.players.forEach((player) => {
+    player.cheerCount = playersSnapshot[player.id]?.cheerCount ?? 0;
+  });
+
+  hideElement(selectors.hostForm);
+  showElement(selectors.spectatorPanel);
+  setSpectatorStatus("Connected as spectator. Choose a horse to cheer!");
+  renderSpectatorButtons();
+  subscribeToPlayers(sessionId);
+  persistSessionCache("spectator");
+}
+
+function leaveSpectatorMode() {
+  if (state.mode === ClientMode.SPECTATOR) {
+    state.mode = ClientMode.HOST;
+    state.sessionId = null;
+    state.cheerButtonRefs.clear();
+    selectors.cheerButtons?.replaceChildren();
+    hideElement(selectors.spectatorPanel);
+    setSpectatorStatus("Searching for an active race…");
+  }
+  showElement(selectors.hostForm);
+}
+
+function handleCheer(playerId, button) {
+  if (!playerId) {
+    return;
+  }
+
+  const cooldownMs = 750;
+  button.disabled = true;
+  button.dataset.cooldown = "true";
+
+  const payload = {
+    origin: "spectator",
+    sessionId: state.sessionId,
+    playerId,
+    delta: 1,
+  };
+
+  const useOffline = state.offlineMode || !state.database;
+  const cheerPromise = useOffline ? Promise.reject(new Error("offline-mode")) : cheerTransaction(playerId);
+
+  cheerPromise
+    .then(() => {
+      logFirebase("cheer:committed", { playerId, sessionId: state.sessionId });
+      publishBus("cheer", payload);
+    })
+    .catch((error) => {
+      publishBus("cheer", payload);
+      logFirebase("cheer:error", { message: error.message, playerId });
+    })
+    .finally(() => {
+      globalThis.setTimeout(() => {
+        button.disabled = false;
+        button.dataset.cooldown = "false";
+        updateSpectatorCheerCounts();
+      }, cooldownMs);
+    });
+}
+
+async function createSessionInFirebase() {
+  let remoteEnabled = Boolean(state.database);
+  if (!remoteEnabled) {
+    state.offlineMode = true;
+    logFirebase("session:error", { message: "Database not initialised" });
+  } else {
+    await ensureAnonymousAuth(state.firebaseApp);
+  }
+
+  state.sessionId = createSessionId();
+
+  if (remoteEnabled) {
+    const sessionRef = ref(state.database, `${SESSION_PATH}/${state.sessionId}`);
+    state.sessionRef = sessionRef;
+
+    const playersPayload = {};
+    state.players.forEach((player) => {
+      playersPayload[player.id] = {
+        name: player.name,
+        laneIndex: player.laneIndex,
+        cheerCount: 0,
+        distance: 0,
+      };
+    });
+
+    state.offlineMode = false;
+    try {
+      await set(sessionRef, {
+        status: "pending",
+        seed: state.seed,
+        tick: 0,
+        createdAt: new Date().toISOString(),
+        finishOrder: [],
+        players: playersPayload,
+      });
+
+      logFirebase("session:created", { sessionId: state.sessionId, playerCount: state.players.length });
+      subscribeToPlayers(state.sessionId);
+    } catch (error) {
+      state.offlineMode = true;
+      logFirebase("session:create-error", { message: error.message });
+    }
+  }
+
+  publishBus("session-created", getSessionBroadcastPayload());
+  startSessionBroadcastLoop();
+
+  if (state.offlineMode) {
+    logSession("session:offline-mode", { sessionId: state.sessionId });
+  }
+
+  logSession("cache:persist", { owner: "host", sessionId: state.sessionId });
+  persistSessionCache("host");
+}
+
+function updateSessionPatch(patch) {
+  if (!state.database || !state.sessionId || !patch) {
+    return;
+  }
+  const sessionRef = ref(state.database, `${SESSION_PATH}/${state.sessionId}`);
+  update(sessionRef, patch).catch((error) => {
+    logFirebase("session:update-error", { message: error.message });
+  });
+}
+
+async function cleanupSession({ reason = "manual", publish = true, resetUi = true } = {}) {
+  if (state.cleanupPromise) {
+    return state.cleanupPromise;
+  }
+
+  const executor = async () => {
+    const activeSessionId = state.sessionId;
+    const hadSession = Boolean(activeSessionId);
+
+    cancelCountdown();
+    stopRaceLoop();
+    clearPlayersSubscription();
+    stopSessionBroadcastLoop();
+
+    if (hadSession && publish) {
+      publishBus("session-finished", { sessionId: activeSessionId });
+    }
+
+    state.sessionId = null;
+    state.sessionRef = null;
+    state.raceStatus = "idle";
+    state.mode = ClientMode.HOST;
+
+    let removed = false;
+    if (hadSession && state.database && !state.offlineMode) {
+      try {
+        const sessionRef = ref(state.database, `${SESSION_PATH}/${activeSessionId}`);
+        await remove(sessionRef);
+        removed = true;
+        logFirebase("session:deleted", { sessionId: activeSessionId, reason });
+      } catch (error) {
+        logFirebase("session:delete-error", {
+          sessionId: activeSessionId,
+          reason,
+          message: error.message,
+        });
+      }
+    } else if (hadSession) {
+      logFirebase("session:delete-skipped", {
+        sessionId: activeSessionId,
+        reason,
+        offline: true,
+      });
+    }
+
+    state.players = [];
+    state.finishOrder = [];
+    state.tick = 0;
+    state.rng = null;
+    state.seed = null;
+    state.cheerButtonRefs.clear();
+
+    selectors.tracksContainer?.replaceChildren?.();
+    selectors.cheerButtons?.replaceChildren?.();
+    selectors.resultsList?.replaceChildren?.();
+    selectors.countdownModal?.classList.add("hidden");
+    selectors.resultsModal?.classList.add("hidden");
+
+    clearSessionCache();
+    showElement(selectors.hostForm);
+    hideElement(selectors.spectatorPanel);
+    setSpectatorStatus("Waiting for host to start a race…");
+    enableHostControls();
+
+    if (resetUi) {
+      selectors.playerInput?.focus();
+    }
+
+    logSession("session:cleanup", {
+      sessionId: activeSessionId,
+      reason,
+      removed,
+    });
+
+    return removed;
+  };
+
+  const promise = executor().finally(() => {
+    state.cleanupPromise = null;
+  });
+  state.cleanupPromise = promise;
+  return promise;
 }
 
 function disableHostControls() {
@@ -186,6 +784,8 @@ async function bootstrapFirebase() {
   const config = loadFirebaseConfig();
   const firebaseApp = initializeApp(config);
   const database = getDatabase(firebaseApp);
+
+  await ensureAnonymousAuth(firebaseApp);
 
   logFirebase("config:loaded", { projectId: config.projectId });
 
@@ -319,6 +919,18 @@ function performRaceTick() {
 
   logTick(state.tick, { players: tickSummary });
 
+  if (state.mode === ClientMode.HOST && state.sessionId) {
+    const patch = { tick: state.tick };
+    state.players.forEach((player) => {
+      patch[`players/${player.id}/distance`] = Number(player.distance.toFixed(4));
+      patch[`players/${player.id}/cheerCount`] = player.cheerCount ?? 0;
+      if (player.rank != null) {
+        patch[`players/${player.id}/rank`] = player.rank;
+      }
+    });
+    updateSessionPatch(patch);
+  }
+
   if (state.finishOrder.length === state.players.length) {
     finishRace();
   }
@@ -331,6 +943,13 @@ function finishRace() {
   selectors.resultsModal?.classList.remove("hidden");
   enableHostControls();
   selectors.resultsClose?.focus();
+
+  if (state.mode === ClientMode.HOST && state.sessionId) {
+    updateSessionPatch({
+      status: "finished",
+      finishOrder: state.finishOrder.map((player) => player.id),
+    });
+  }
 
   logSession("race:completed", {
     finishOrder: state.finishOrder.map((player) => ({
@@ -442,9 +1061,9 @@ function parsePlayerNames(rawValue) {
     }));
 }
 
-function handleStart(event) {
+async function handleStart(event) {
   event.preventDefault();
-  if (state.raceStatus === "countdown" || state.raceStatus === "running") {
+  if (["pending", "countdown", "running"].includes(state.raceStatus)) {
     return;
   }
 
@@ -455,8 +1074,11 @@ function handleStart(event) {
     return;
   }
 
+  leaveSpectatorMode();
   cancelCountdown();
   stopRaceLoop();
+  clearPlayersSubscription();
+  stopSessionBroadcastLoop();
 
   state.players = players.map((player, index) => createPlayerState(player, index));
   state.finishOrder = [];
@@ -466,7 +1088,7 @@ function handleStart(event) {
       ? window.__RACE_SEED__
       : Date.now();
   state.rng = createRng(state.seed);
-  state.raceStatus = "countdown";
+  state.raceStatus = "pending";
 
   if (selectors.resultsList) {
     selectors.resultsList.innerHTML = "";
@@ -481,6 +1103,10 @@ function handleStart(event) {
     seed: state.seed,
   });
 
+  await createSessionInFirebase();
+  state.raceStatus = "countdown";
+  updateSessionPatch({ status: "countdown" });
+
   disableHostControls();
   selectors.countdownModal?.classList.remove("hidden");
   updateCountdownDisplay(5);
@@ -492,6 +1118,7 @@ function handleStart(event) {
       state.countdownCancel = null;
       selectors.countdownModal?.classList.add("hidden");
       logSession("countdown:complete");
+      updateSessionPatch({ status: "running" });
       logSession("race:start", { tickIntervalMs: TICK_MS, playerCount: state.players.length });
       startRaceLoop();
     },
@@ -500,36 +1127,89 @@ function handleStart(event) {
 
 function registerEventListeners() {
   selectors.hostForm?.addEventListener("submit", handleStart);
-  selectors.resultsClose?.addEventListener("click", () => {
-    selectors.resultsModal?.classList.add("hidden");
-    selectors.resultsList?.replaceChildren();
-    enableHostControls();
-    state.raceStatus = "idle";
+  selectors.resultsClose?.addEventListener("click", async () => {
+    if (state.mode === ClientMode.HOST) {
+      updateSessionPatch({ status: "finished" });
+    }
+    await cleanupSession({ reason: "results-close" });
     logSession("results:closed");
-    selectors.playerInput?.focus();
   });
+
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("beforeunload", () => {
+      if (state.mode === ClientMode.HOST && state.sessionId) {
+        cleanupSession({ reason: "unload", resetUi: false }).catch(() => {});
+      }
+    });
+  }
 }
 
 function init() {
+  if (typeof window !== "undefined") {
+    const search = window.location?.search ?? "";
+    if (typeof search === "string" && search.length > 0) {
+      const params = new URLSearchParams(search);
+      if (params.get("mode") === "spectator") {
+        state.forcedMode = ClientMode.SPECTATOR;
+      }
+    }
+  }
+
+  setupBroadcastChannel();
   registerEventListeners();
   selectors.countdownModal?.classList.add("hidden");
   selectors.resultsModal?.classList.add("hidden");
 
   bootstrapFirebase()
     .then((detection) => {
-      if (detection.mode === ClientMode.SPECTATOR) {
-        selectors.hostForm?.classList.add("hidden");
+      const localSession = loadSessionCache();
+
+      if (state.forcedMode === ClientMode.SPECTATOR) {
+        state.mode = ClientMode.SPECTATOR;
+        if (detection.sessionId) {
+          enterSpectatorMode(detection.sessionId, detection.session ?? {});
+        } else if (localSession?.sessionId) {
+          enterSpectatorMode(localSession.sessionId, {
+            players: playersArrayToSnapshot(localSession.players),
+          });
+        } else {
+          hideElement(selectors.hostForm);
+          showElement(selectors.spectatorPanel);
+          setSpectatorStatus("Waiting for host to start a race…");
+          startLocalCachePoll();
+        }
+        return;
+      }
+
+      if (detection.mode === ClientMode.SPECTATOR && detection.sessionId) {
+        enterSpectatorMode(detection.sessionId, detection.session ?? {});
       } else {
-        selectors.hostForm?.classList.remove("hidden");
+        leaveSpectatorMode();
+        if (localSession?.owner === "host" && Date.now() - (localSession.updatedAt ?? 0) > 60_000) {
+          clearSessionCache();
+        }
       }
     })
     .catch((error) => {
       logFirebase("error", { message: error.message });
-      selectors.hostForm?.classList.remove("hidden");
+      if (state.forcedMode === ClientMode.SPECTATOR) {
+        state.mode = ClientMode.SPECTATOR;
+        hideElement(selectors.hostForm);
+        showElement(selectors.spectatorPanel);
+        setSpectatorStatus("Unable to reach Firebase. Waiting for local race data…");
+        startLocalCachePoll();
+      } else {
+        leaveSpectatorMode();
+      }
     });
 }
 
 init();
+
+const __TEST_ONLY__ = {
+  performRaceTick,
+  cleanupSession,
+};
 
 export {
   CHEER_BOOST_FACTOR,
@@ -547,4 +1227,5 @@ export {
   renderInitialTracks,
   scheduleCountdown,
   state,
+  __TEST_ONLY__,
 };

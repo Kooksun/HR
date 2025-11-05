@@ -79,6 +79,7 @@ body {
   padding: clamp(1rem, 4vw, 3rem);
   display: grid;
   place-items: center;
+  gap: 2rem;
 }
 
 .tracks {
@@ -170,6 +171,76 @@ body {
   margin-top: 0;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.spectator {
+  width: min(90vw, 480px);
+  padding: clamp(1rem, 3vw, 2rem);
+  background: rgba(4, 16, 37, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  display: grid;
+  gap: 1rem;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+}
+
+.spectator-title {
+  margin: 0;
+  font-size: clamp(1.125rem, 2.5vw, 1.75rem);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.spectator-status {
+  margin: 0;
+  font-size: 0.95rem;
+  color: rgba(245, 249, 255, 0.82);
+}
+
+.cheer-buttons {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.cheer-button {
+  padding: 0.75rem 1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: linear-gradient(135deg, rgba(6, 214, 160, 0.9), rgba(17, 138, 178, 0.9));
+  color: #001220;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.cheer-button:hover,
+.cheer-button:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(6, 214, 160, 0.35);
+}
+
+.cheer-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+  transform: none;
+  box-shadow: none;
+}
+
+.cheer-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(0, 18, 32, 0.75);
+  color: #f5f9ff;
+  font-size: 0.85rem;
 }
 
 .results-content ol {

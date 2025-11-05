@@ -4,6 +4,11 @@ vi.mock("https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js", () => ({
   initializeApp: vi.fn(() => ({})),
 }));
 
+vi.mock("https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js", () => ({
+  getAuth: vi.fn(() => ({})),
+  signInAnonymously: vi.fn(() => Promise.resolve({ user: { uid: "auth-test" } })),
+}));
+
 vi.mock("https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js", () => ({
   getDatabase: vi.fn(() => ({})),
   get: vi.fn(() => Promise.resolve({ exists: () => false })),

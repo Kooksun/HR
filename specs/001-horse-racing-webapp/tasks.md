@@ -66,16 +66,16 @@
 
 ### Tests for User Story 2 (required)
 
-- [ ] T020 [P] [US2] Add Vitest coverage for spectator mode detection and cheer count amplification in `tests/unit/spectator.spec.js`
-- [ ] T021 [P] [US2] Extend Playwright scenario validating cheer latency and UI state in `tests/e2e/cheer-mode.spec.ts`
+- [X] T020 [P] [US2] Add Vitest coverage for spectator mode detection and cheer count amplification in `tests/unit/spectator.spec.js`
+- [X] T021 [P] [US2] Extend Playwright scenario validating cheer latency and UI state in `tests/e2e/cheer-mode.spec.ts`
 
 ### Implementation for User Story 2
 
-- [ ] T022 [US2] Inject spectator cheer controls container and status banners in `index.html`
-- [ ] T023 [P] [US2] Style cheer buttons with focus rings and responsive layout in `style.css`
-- [ ] T024 [US2] Implement spectator mode detection and cheer button rendering in `app.js`
-- [ ] T025 [US2] Wire cheer button events to Firebase transactions and debounce rapid taps in `app.js`
-- [ ] T026 [P] [US2] Apply cheer-derived boost calculations inside tick loop and log `cheerBoost` component in `app.js`
+- [X] T022 [US2] Inject spectator cheer controls container and status banners in `index.html`
+- [X] T023 [P] [US2] Style cheer buttons with focus rings and responsive layout in `style.css`
+- [X] T024 [US2] Implement spectator mode detection and cheer button rendering in `app.js`
+- [X] T025 [US2] Wire cheer button events to Firebase transactions and debounce rapid taps in `app.js`
+- [X] T026 [P] [US2] Apply cheer-derived boost calculations inside tick loop and log `cheerBoost` component in `app.js`
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
@@ -87,14 +87,14 @@
 
 ### Tests for User Story 3 (required)
 
-- [ ] T027 [P] [US3] Create Vitest tests for session init, status transitions, and cleanup hooks in `tests/unit/session.spec.js`
-- [ ] T028 [P] [US3] Add Playwright coverage verifying database cleanup on finish/unload in `tests/e2e/cleanup.spec.ts`
+- [X] T027 [P] [US3] Create Vitest tests for session init, status transitions, and cleanup hooks in `tests/unit/session.spec.js`
+- [X] T028 [P] [US3] Add Playwright coverage verifying database cleanup on finish/unload in `tests/e2e/cleanup.spec.ts`
 
 ### Implementation for User Story 3
 
-- [ ] T029 [US3] Initialize session document with players, seed, and status lifecycle in `app.js`
-- [ ] T030 [P] [US3] Implement window `beforeunload` cleanup deleting session path and logging outcome in `app.js`
-- [ ] T031 [US3] Trigger cleanup after result confirmation and reset UI state in `app.js`
+- [X] T029 [US3] Initialize session document with players, seed, and status lifecycle in `app.js`
+- [X] T030 [P] [US3] Implement window `beforeunload` cleanup deleting session path and logging outcome in `app.js`
+- [X] T031 [US3] Trigger cleanup after result confirmation and reset UI state in `app.js`
 
 **Checkpoint**: All user stories should now be independently functional
 

@@ -18,7 +18,10 @@ firebase-config.js
 # Firebase emulator data and logs
 .firebase/emulator-data/
 firebase-debug.log*
-database-debug.log
+database-debug.log*
+ui-debug.log*
+firestore-debug.log*
+hub-debug.log*
 
 # OS / Editor cruft
 .DS_Store

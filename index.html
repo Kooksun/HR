@@ -28,6 +28,16 @@
       <section id="tracks" class="tracks" aria-live="polite">
         <!-- Tracks rendered by app.js -->
       </section>
+      <section
+        id="spectator-panel"
+        class="spectator hidden"
+        data-role="spectator-controls"
+        aria-live="polite"
+      >
+        <h2 class="spectator-title">Cheer for Your Horse</h2>
+        <p id="spectator-status" class="spectator-status">Searching for an active race…</p>
+        <div id="cheer-buttons" class="cheer-buttons" role="group" aria-label="Cheer buttons"></div>
+      </section>
     </main>
 
     <div id="countdown" class="countdown hidden" role="dialog" aria-live="assertive" aria-modal="true">
