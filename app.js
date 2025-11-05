@@ -20,7 +20,7 @@ import {
  */
 
 const TICK_MS = 1_000;
-const CHEER_BOOST_FACTOR = 0.05;
+const CHEER_BOOST_FACTOR = 0.0005;
 const LANE_CONFIG = Object.freeze({
   horseEmoji: "🏇",
   finishEmoji: "🏁",
@@ -468,6 +468,7 @@ function enterSpectatorMode(sessionId, sessionData = {}) {
   });
 
   hideElement(selectors.hostForm);
+  hideElement(selectors.tracksContainer);
   showElement(selectors.spectatorPanel);
   setSpectatorStatus("Connected as spectator. Choose a horse to cheer!");
   renderSpectatorButtons();
@@ -485,6 +486,7 @@ function leaveSpectatorMode() {
     setSpectatorStatus("Searching for an active race…");
   }
   showElement(selectors.hostForm);
+  showElement(selectors.tracksContainer);
 }
 
 function handleCheer(playerId, button) {
@@ -890,13 +892,16 @@ function performRaceTick() {
       return;
     }
 
-    const baseStep = 0.02 + state.rng() * 0.06;
+    const baseStep = 0.015 + state.rng() * 0.035;
     const cheerBoost = player.cheerCount * CHEER_BOOST_FACTOR;
     const remainingDistance = Math.max(0, 1 - player.distance);
     const totalStep = Math.min(baseStep + cheerBoost, remainingDistance);
 
     player.distance = Math.min(1, player.distance + totalStep);
     updateHorsePosition(player);
+    if (player.elements.cheerCountDisplay) {
+      player.elements.cheerCountDisplay.textContent = ` (🎉 ${player.cheerCount ?? 0})`;
+    }
 
     if (player.distance >= 1) {
       player.finished = true;
