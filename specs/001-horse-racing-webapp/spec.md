@@ -3,7 +3,7 @@
 **Feature Branch**: `001-horse-racing-webapp`  
 **Created**: 2025-11-04  
 **Status**: Draft  
-**Input**: User description: "* 플레이어들을 경주마로 표현하고 랜덤하게 진행시켜 승자를 뽑는 시뮬레이션 게임 웹앱이다. * 프로젝트는 심플하게 구성하여 index.html, style.css, app.js 으로 이루어진다. * 게임 세션은 Firebase를 연동해서 플레이어들을 응원하면 어드밴티지를 주는 것이 특징이다."
+**Input**: User description: "* 플레이어들을 경주마로 표현하고 랜덤하게 진행시켜 승자를 뽑는 시뮬레이션 게임 웹앱이다. * 프로젝트는 심플하게 구성하여 index.html, style.css, app.js, firebase-config.js 으로 이루어진다. * 게임 세션은 Firebase를 연동해서 플레이어들을 응원하면 어드밴티지를 주는 것이 특징이다."
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -33,7 +33,8 @@ As a remote spectator, I want to join an active race and cheer for my favourite 
 **Acceptance Scenarios**:
 
 1. **Given** the database contains an active session, **When** a spectator loads the page, **Then** they see cheer buttons instead of race controls and the console logs that spectator mode is active.  
-2. **Given** the spectator taps a cheer button three times, **When** one second ticks, **Then** the database stores the incremented cheer count and the horse gains extra distance logged in both clients.
+2. **Given** the spectator taps a cheer button three times, **When** one second ticks, **Then** the database stores the incremented cheer count and the horse gains extra distance logged in both clients.  
+3. **Given** a host client transitions into spectator mode, **When** the spectator UI renders, **Then** the race controls and track list hide and each player name shows a live cheer count beside it.
 
 ---
 
@@ -54,7 +55,7 @@ As a maintainer, I want session state to initialize and clean up automatically s
 
 ### Edge Cases
 
-- What happens when fewer than 2 or more than 10 names are submitted?
+- What happens when fewer than 2 or more than 8 names are submitted?
 - How does the system handle duplicate player names?
 - How is advantage resolved if simultaneous cheering events arrive at the same tick?
 - What occurs when Firebase connectivity drops mid-race?
@@ -63,7 +64,7 @@ As a maintainer, I want session state to initialize and clean up automatically s
 ### Firebase & Advantage Flow *(mandatory)*
 
 - **Cheering Payload**: `{ playerId, intensity, timestamp }`
-- **Advantage Formula**: `tickDistance = baseRandom(0.2-0.8) + (cheerCount * cheerBoostFactor)` where `cheerBoostFactor` is deterministic and capped per tick.
+- **Advantage Formula**: `tickDistance = baseRandom(0.015-0.05) + (cheerCount * 0.0005)` where the multiplier is deterministic and capped per tick.
 - **Security Rules**: `write` rules allow only authenticated host writes to `/sessions/{sessionId}/players/*` for initialization and allow public cheering increments via callable cloud rules that enforce existing player IDs.
 - **Emulator Strategy**: Use Firebase Emulator Suite with seeded cheering scripts to replay increments; tests point `FIREBASE_EMULATOR_HOST` to localhost and reset state between cases.
 
@@ -93,7 +94,7 @@ As a maintainer, I want session state to initialize and clean up automatically s
 
 ### Measurable Outcomes
 
-- **SC-001**: Host can start and complete a race with up to 10 players in under 2 minutes on a mid-tier laptop.
+- **SC-001**: Host can start and complete a race with up to 8 players in under 2 minutes on a mid-tier laptop.
 - **SC-002**: Spectator cheering increments reflect in host animation within 1 second round-trip latency.
 - **SC-003**: Accessibility audit (Lighthouse) achieves ≥90 score; keyboard-only cheering completes User Story 2 workflow.
 - **SC-004**: Firebase database is cleared within 5 seconds of race completion or window unload.
