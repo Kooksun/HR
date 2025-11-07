@@ -19,8 +19,9 @@ import {
  * Phase 2 adds Firebase bootstrapping, simulation constants, and telemetry hooks.
  */
 
-const TICK_MS = 1_000;
-const CHEER_BOOST_FACTOR = 0.0005;
+const TICK_MS = 500;
+const CHEER_BOOST_FACTOR = 0.0004;
+const RACE_DISTANCE = 1.5;
 const LANE_CONFIG = Object.freeze({
   horseEmoji: "🏇",
   finishEmoji: "🏁",
@@ -859,7 +860,7 @@ function updateHorsePosition(player) {
   if (!horseEl) {
     return;
   }
-  const progressPercent = Math.min(player.distance * 100, 100);
+  const progressPercent = Math.min((player.distance / RACE_DISTANCE) * 100, 100);
   horseEl.style.left = `${progressPercent}%`;
   horseEl.style.transform = `translateX(-50%) translateY(-50%) scaleX(-1)`;
 }
@@ -897,18 +898,18 @@ function performRaceTick() {
       return;
     }
 
-    const baseStep = 0.015 + state.rng() * 0.035;
+    const baseStep = 0.01 + state.rng() * 0.03;
     const cheerBoost = player.cheerCount * CHEER_BOOST_FACTOR;
-    const remainingDistance = Math.max(0, 1 - player.distance);
+    const remainingDistance = Math.max(0, RACE_DISTANCE - player.distance);
     const totalStep = Math.min(baseStep + cheerBoost, remainingDistance);
 
-    player.distance = Math.min(1, player.distance + totalStep);
+    player.distance = Math.min(RACE_DISTANCE, player.distance + totalStep);
     updateHorsePosition(player);
     if (player.elements.cheerCountDisplay) {
       player.elements.cheerCountDisplay.textContent = ` (🎉 ${player.cheerCount ?? 0})`;
     }
 
-    if (player.distance >= 1) {
+    if (player.distance >= RACE_DISTANCE) {
       player.finished = true;
       player.finishTick = state.tick;
       player.rank = state.finishOrder.length + 1;
