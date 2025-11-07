@@ -403,14 +403,8 @@ function updateSpectatorCheerCounts() {
   }
   state.players.forEach((player) => {
     const buttonElements = state.cheerButtonRefs.get(player.id);
-    if (buttonElements) {
-      const { button, countLabel } = buttonElements;
-      if (button) {
-        button.disabled = button.dataset.cooldown === "true";
-      }
-      if (countLabel) {
-        countLabel.textContent = String(player.cheerCount ?? 0);
-      }
+    if (buttonElements?.countLabel) {
+      buttonElements.countLabel.textContent = String(player.cheerCount ?? 0);
     }
   });
 }
@@ -424,25 +418,42 @@ function renderSpectatorButtons() {
   state.cheerButtonRefs.clear();
 
   state.players.forEach((player) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "cheer-button";
-    button.dataset.role = "cheer-button";
-    button.dataset.playerId = player.id;
-    button.setAttribute("aria-label", `Cheer for ${player.name}`);
+    const wrapper = document.createElement("div");
+    wrapper.className = "cheer-control";
 
     const label = document.createElement("span");
+    label.className = "cheer-label";
     label.textContent = player.name;
 
     const count = document.createElement("span");
     count.className = "cheer-count";
     count.textContent = String(player.cheerCount ?? 0);
 
-    button.append(label, count);
-    button.addEventListener("click", () => handleCheer(player.id, button));
+    const cheerButton = document.createElement("button");
+    cheerButton.type = "button";
+    cheerButton.className = "cheer-button";
+    cheerButton.dataset.role = "cheer-button";
+    cheerButton.dataset.playerId = player.id;
+    cheerButton.setAttribute("aria-label", `Cheer for ${player.name}`);
+    cheerButton.textContent = "응원 👏";
+    cheerButton.addEventListener("click", () => handleCheerAction(player.id, 1));
 
-    selectors.cheerButtons.appendChild(button);
-    state.cheerButtonRefs.set(player.id, { button, countLabel: count });
+    const hinderButton = document.createElement("button");
+    hinderButton.type = "button";
+    hinderButton.className = "hinder-button";
+    hinderButton.dataset.role = "hinder-button";
+    hinderButton.dataset.playerId = player.id;
+    hinderButton.setAttribute("aria-label", `Hinder ${player.name}`);
+    hinderButton.textContent = "방해 👎";
+    hinderButton.addEventListener("click", () => handleCheerAction(player.id, -1));
+
+    const buttonGroup = document.createElement("div");
+    buttonGroup.className = "button-group";
+    buttonGroup.append(cheerButton, hinderButton);
+
+    wrapper.append(label, count, buttonGroup);
+    selectors.cheerButtons.appendChild(wrapper);
+    state.cheerButtonRefs.set(player.id, { cheerButton, hinderButton, countLabel: count });
   });
 
   updateSpectatorCheerCounts();
@@ -489,40 +500,33 @@ function leaveSpectatorMode() {
   showElement(selectors.tracksContainer);
 }
 
-function handleCheer(playerId, button) {
+function handleCheerAction(playerId, delta) {
   if (!playerId) {
     return;
   }
-
-  const cooldownMs = 750;
-  button.disabled = true;
-  button.dataset.cooldown = "true";
 
   const payload = {
     origin: "spectator",
     sessionId: state.sessionId,
     playerId,
-    delta: 1,
+    delta,
   };
 
   const useOffline = state.offlineMode || !state.database;
-  const cheerPromise = useOffline ? Promise.reject(new Error("offline-mode")) : cheerTransaction(playerId);
+  const cheerPromise = useOffline
+    ? Promise.reject(new Error("offline-mode"))
+    : cheerTransaction(playerId, delta);
 
   cheerPromise
     .then(() => {
-      logFirebase("cheer:committed", { playerId, sessionId: state.sessionId });
+      const event = delta > 0 ? "cheer:committed" : "hinder:committed";
+      logFirebase(event, { playerId, sessionId: state.sessionId, delta });
       publishBus("cheer", payload);
     })
     .catch((error) => {
+      const event = delta > 0 ? "cheer:error" : "hinder:error";
       publishBus("cheer", payload);
-      logFirebase("cheer:error", { message: error.message, playerId });
-    })
-    .finally(() => {
-      globalThis.setTimeout(() => {
-        button.disabled = false;
-        button.dataset.cooldown = "false";
-        updateSpectatorCheerCounts();
-      }, cooldownMs);
+      logFirebase(event, { message: error.message, playerId, delta });
     });
 }
 
@@ -818,9 +822,9 @@ function createRng(seed) {
   };
 }
 
-async function cheerTransaction(playerId, sessionId = state.sessionId) {
+async function cheerTransaction(playerId, delta = 1, sessionId = state.sessionId) {
   if (!sessionId) {
-    throw new Error("Cannot cheer without an active session.");
+    throw new Error("Cannot cheer/hinder without an active session.");
   }
   if (!state.database) {
     throw new Error("Database not initialised.");
@@ -828,7 +832,8 @@ async function cheerTransaction(playerId, sessionId = state.sessionId) {
 
   const cheersRef = ref(state.database, `${SESSION_PATH}/${sessionId}/players/${playerId}/cheerCount`);
   return runTransaction(cheersRef, (current) => {
-    const next = (typeof current === "number" ? current : 0) + 1;
+    const currentVal = typeof current === "number" ? current : 0;
+    const next = currentVal + delta; // Allow negative scores
     return Number.isNaN(next) ? 0 : next;
   });
 }

@@ -210,35 +210,77 @@ body {
 }
 
 .cheer-buttons {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 0.75rem;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.cheer-control {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+}
+
+.cheer-label {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.button-group {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.cheer-button,
+.hinder-button {
+  flex-shrink: 0;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  border: none;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  text-align: center;
+}
+
+.cheer-button:hover,
+.hinder-button:hover,
+.cheer-button:focus-visible,
+.hinder-button:focus-visible {
+  transform: translateY(-2px);
 }
 
 .cheer-button {
-  padding: 0.75rem 1rem;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: linear-gradient(135deg, rgba(6, 214, 160, 0.9), rgba(17, 138, 178, 0.9));
-  color: #001220;
-  font-weight: 700;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  background: linear-gradient(135deg, #06d6a0, #118ab2);
+  color: #fff;
 }
 
 .cheer-button:hover,
 .cheer-button:focus-visible {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 24px rgba(6, 214, 160, 0.35);
+  box-shadow: 0 6px 18px rgba(6, 214, 160, 0.3);
 }
 
-.cheer-button:disabled {
-  cursor: wait;
-  opacity: 0.7;
+.hinder-button {
+  background: linear-gradient(135deg, #ef476f, #ffd166);
+  color: #fff;
+}
+
+.hinder-button:hover,
+.hinder-button:focus-visible {
+  box-shadow: 0 6px 18px rgba(239, 71, 111, 0.3);
+}
+
+.cheer-button:disabled,
+.hinder-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
   transform: none;
   box-shadow: none;
 }
