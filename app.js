@@ -57,6 +57,8 @@ const selectors = {
   spectatorPanel: document.querySelector("#spectator-panel"),
   spectatorStatus: document.querySelector("#spectator-status"),
   cheerButtons: document.querySelector("#cheer-buttons"),
+  casterBoard: document.querySelector("#caster-board"),
+  casterText: document.querySelector("#caster-text"),
 };
 
 const state = {
@@ -70,6 +72,10 @@ const state = {
   tick: 0,
   raceStatus: "idle",
   finishOrder: [],
+  casterAnnouncements: new Set(),
+  previousRanking: [],
+  casterLock: false,
+  casterLockTimer: null,
   countdownCancel: null,
   animationFrameId: null,
   accumulator: 0,
@@ -327,6 +333,38 @@ function handleBusMessage(event) {
 function setSpectatorStatus(message) {
   if (selectors.spectatorStatus) {
     selectors.spectatorStatus.textContent = message;
+  }
+}
+
+function updateCasterText(message, { force = false, lock = 0, append = false } = {}) {
+  if (state.casterLock && !force) {
+    return; // Don't override a locked message
+  }
+  if (!selectors.casterText) {
+    return;
+  }
+
+  if (append) {
+    selectors.casterText.innerHTML += message;
+  } else {
+    selectors.casterText.innerHTML = message;
+  }
+
+  if (lock > 0) {
+    state.casterLock = true;
+    if (state.casterLockTimer) {
+      clearTimeout(state.casterLockTimer);
+    }
+    state.casterLockTimer = setTimeout(() => {
+      state.casterLock = false;
+      state.casterLockTimer = null;
+    }, lock);
+  }
+}
+
+function clearCasterText() {
+  if (selectors.casterText) {
+    selectors.casterText.innerHTML = "";
   }
 }
 
@@ -647,6 +685,13 @@ async function cleanupSession({ reason = "manual", publish = true, resetUi = tru
     state.rng = null;
     state.seed = null;
     state.cheerButtonRefs.clear();
+    state.casterAnnouncements.clear();
+    state.previousRanking = [];
+    state.casterLock = false;
+    if (state.casterLockTimer) {
+      clearTimeout(state.casterLockTimer);
+      state.casterLockTimer = null;
+    }
 
     selectors.tracksContainer?.replaceChildren?.();
     selectors.cheerButtons?.replaceChildren?.();
@@ -882,18 +927,20 @@ function performRaceTick() {
   state.tick += 1;
 
   const tickSummary = [];
+  const currentRanking = [...state.players]
+    .sort((a, b) => b.distance - a.distance)
+    .map((p) => p.id);
+
+  if (state.previousRanking.length === 0) {
+    state.previousRanking = currentRanking;
+  }
+
+  let announcementMade = false;
 
   state.players.forEach((player) => {
     if (player.finished) {
       tickSummary.push({
-        playerId: player.id,
-        distance: player.distance,
-        finished: true,
-        rank: player.rank,
-        cheerCount: player.cheerCount,
-        baseStep: 0,
-        cheerBoost: 0,
-        totalStep: 0,
+        /* ... existing summary ... */
       });
       return;
     }
@@ -909,29 +956,118 @@ function performRaceTick() {
       player.elements.cheerCountDisplay.textContent = ` (🎉 ${player.cheerCount ?? 0})`;
     }
 
-    if (player.distance >= RACE_DISTANCE) {
+    if (player.distance >= RACE_DISTANCE && !player.finished) {
       player.finished = true;
       player.finishTick = state.tick;
-      player.rank = state.finishOrder.length + 1;
+      const rank = state.finishOrder.length + 1;
+      player.rank = rank;
       state.finishOrder.push(player);
       appendResultEntry(player);
       if (player.elements.rankDisplay) {
-        player.elements.rankDisplay.textContent = `${player.rank}등`;
+        player.elements.rankDisplay.textContent = `${rank}등`;
         player.elements.rankDisplay.style.display = "block";
+      }
+
+      if (rank === 1) {
+        const finishMessage = `우승! ${player.laneIndex + 1}번 레인 <span class="caster-name">${
+          player.name
+        }</span> 선수가 우승합니다!`;
+        updateCasterText(finishMessage, { force: true });
+      } else if (rank === 2) {
+        const finishMessage = ` 그리고 ${rank}등, <span class="caster-name">${player.name}</span> 선수!`;
+        updateCasterText(finishMessage, { force: true, append: true });
+      } else if (rank === 3) {
+        const finishMessage = ` ${rank}등, <span class="caster-name">${player.name}</span> 선수!`;
+        updateCasterText(finishMessage, { force: true, append: true });
+      }
+      announcementMade = true;
+    }
+    tickSummary.push({
+      /* ... existing summary ... */
+    });
+  });
+
+  // --- Caster Logic (only if no one has finished yet) ---
+  if (state.finishOrder.length === 0) {
+    const newRanking = [...state.players]
+      .sort((a, b) => b.distance - a.distance)
+      .map((p) => p.id);
+    const newLeaderId = newRanking[0];
+    const oldLeaderId = state.previousRanking[0];
+
+    // 1. Leader overtakes
+    if (newLeaderId !== oldLeaderId) {
+      const newLeader = state.players.find((p) => p.id === newLeaderId);
+      const oldLeader = state.players.find((p) => p.id === oldLeaderId);
+      if (newLeader && oldLeader) {
+        updateCasterText(
+          `${newLeader.laneIndex + 1}번 레인 <span class="caster-name">${
+            newLeader.name
+          }</span> 선수가 <span class="caster-name">${
+            oldLeader.name
+          }</span> 선수를 추월하며 선두로 나섭니다!`,
+        );
+        announcementMade = true;
       }
     }
 
-    tickSummary.push({
-      playerId: player.id,
-      baseStep,
-      cheerBoost,
-      totalStep,
-      distance: player.distance,
-      cheerCount: player.cheerCount,
-      finished: player.finished,
-      rank: player.rank,
-    });
-  });
+    // 2. Last place overtakes
+    if (!announcementMade && state.players.length > 2) {
+      const oldLastPlaceId = state.previousRanking[state.previousRanking.length - 1];
+      const oldLastPlacePlayer = state.players.find((p) => p.id === oldLastPlaceId);
+      const newRankOfOldLast = newRanking.findIndex((id) => id === oldLastPlaceId);
+
+      if (oldLastPlacePlayer && newRankOfOldLast < state.players.length - 1) {
+        const overtakenPlayerId = state.previousRanking[newRankOfOldLast];
+        const overtakenPlayer = state.players.find((p) => p.id === overtakenPlayerId);
+        if (overtakenPlayer) {
+          updateCasterText(
+            `꼴찌의 반란! ${oldLastPlacePlayer.laneIndex + 1}번 레인 <span class="caster-name">${
+              oldLastPlacePlayer.name
+            }</span> 선수가 <span class="caster-name">${overtakenPlayer.name}</span> 선수를 추월합니다!`,
+          );
+          announcementMade = true;
+        }
+      }
+    }
+
+    // 3. Checkpoint announcements
+    if (!announcementMade) {
+      const leader = state.players.find((p) => p.id === newLeaderId);
+      if (leader) {
+        const checkpoints = [
+          { distance: RACE_DISTANCE * 0.25, point: "1/4" },
+          { distance: RACE_DISTANCE * 0.5, point: "절반" },
+          { distance: RACE_DISTANCE * 0.75, point: "3/4" },
+        ];
+
+        for (const checkpoint of checkpoints) {
+          if (
+            leader.distance >= checkpoint.distance &&
+            !state.casterAnnouncements.has(checkpoint.point)
+          ) {
+            state.casterAnnouncements.add(checkpoint.point);
+            let message = `${checkpoint.point} 지점을 ${leader.laneIndex + 1}번 레인 <span class="caster-name">${
+              leader.name
+            }</span> 선수가 통과합니다!`;
+            if (newRanking.length > 1) {
+              const secondPlace = state.players.find((p) => p.id === newRanking[1]);
+              if (secondPlace) {
+                message += ` 그 다음은 ${secondPlace.laneIndex + 1}번 레인 <span class="caster-name">${
+                  secondPlace.name
+                }</span> 선수!`;
+              }
+            }
+            updateCasterText(message, { lock: 1200 });
+            announcementMade = true;
+            break; // Announce one checkpoint per tick
+          }
+        }
+      }
+    }
+    state.previousRanking = newRanking;
+  }
+  // --- End Caster Logic ---
 
   logTick(state.tick, { players: tickSummary });
 
@@ -1186,6 +1322,14 @@ async function handleStart(event) {
   stopRaceLoop();
   clearPlayersSubscription();
   stopSessionBroadcastLoop();
+  clearCasterText();
+  state.casterAnnouncements.clear();
+  state.previousRanking = [];
+  state.casterLock = false;
+  if (state.casterLockTimer) {
+    clearTimeout(state.casterLockTimer);
+    state.casterLockTimer = null;
+  }
 
   state.players = players.map((player, index) => createPlayerState(player, index));
   state.finishOrder = [];
@@ -1227,6 +1371,7 @@ async function handleStart(event) {
       logSession("countdown:complete");
       updateSessionPatch({ status: "running" });
       logSession("race:start", { tickIntervalMs: TICK_MS, playerCount: state.players.length });
+      updateCasterText(`${state.players.length}명의 선수가 지금 힘차게 출발했습니다!`, { lock: 1200 });
       startRaceLoop();
     },
   });
@@ -1239,6 +1384,7 @@ function registerEventListeners() {
       updateSessionPatch({ status: "finished" });
     }
     await cleanupSession({ reason: "results-close" });
+    clearCasterText();
     logSession("results:closed");
   });
 

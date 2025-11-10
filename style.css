@@ -8,7 +8,7 @@
 *,
 *::before,
 *::after {
-  box-sizing: border-box;
+  box-sizing: content-box;
 }
 
 body {
@@ -79,7 +79,25 @@ body {
   padding: clamp(0.5rem, 2vw, 1.5rem);
   display: grid;
   place-items: center;
-  gap: 2rem;
+}
+
+.caster-board {
+  text-align: center;
+}
+
+.caster-text {
+  margin: 0;
+  font-family: "Courier New", Courier, monospace;
+  font-size: clamp(1rem, 2.5vw, 1.5rem);
+  color: #ffd166;
+  text-shadow: 0 0 5px #ffd166, 0 0 10px #ffd166;
+  line-height: 1.5; 
+  white-space: pre-wrap;
+}
+
+.caster-name {
+  color: #66d9ef;
+  font-weight: bold;
 }
 
 .tracks {
