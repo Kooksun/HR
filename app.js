@@ -864,6 +864,7 @@ function enterSpectatorMode(sessionId, sessionData = {}) {
 
   hideElement(selectors.hostForm);
   hideElement(selectors.tracksContainer);
+  hideElement(selectors.playerRoster);
   showElement(selectors.spectatorPanel);
   setSpectatorStatus("Connected as spectator. Choose a horse to cheer!");
   renderSpectatorButtons();
@@ -887,6 +888,7 @@ function leaveSpectatorMode() {
   }
   showElement(selectors.hostForm);
   showElement(selectors.tracksContainer);
+  showElement(selectors.playerRoster);
 }
 
 function handleCheerAction(playerId, delta) {
