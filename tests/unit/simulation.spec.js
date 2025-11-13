@@ -19,6 +19,7 @@ vi.mock("https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js", () => 
 describe("simulation bootstrap", () => {
   let createRng;
   let scheduleCountdown;
+  let testHelpers;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -43,7 +44,7 @@ describe("simulation bootstrap", () => {
       createElement: vi.fn(() => stubElement()),
     };
 
-    ({ createRng, scheduleCountdown } = await import("../../app.js"));
+    ({ createRng, scheduleCountdown, __TEST_ONLY__: testHelpers } = await import("../../app.js"));
   });
 
   afterEach(() => {
@@ -77,5 +78,39 @@ describe("simulation bootstrap", () => {
     expect(typeof cancel).toBe("function");
 
     cancel();
+  });
+
+  it("calculates lap metrics for multi-lap races", () => {
+    const laps = 3;
+    const totalDistance = testHelpers.getRaceDistance(laps);
+    const halfwayDistance = totalDistance / 2;
+
+    const metrics = testHelpers.calculateLapMetrics(halfwayDistance, laps);
+
+    expect(metrics.totalDistance).toBeCloseTo(totalDistance, 5);
+    expect(metrics.normalized).toBeCloseTo(0.5, 5);
+    expect(metrics.lapsCompleted).toBe(1);
+    expect(metrics.lapProgress).toBeCloseTo(0.5, 5);
+  });
+
+  it("maps normalized progress to CCW angles starting at 1 o'clock", () => {
+    const startAngle = testHelpers.progressToAngle(0, 1);
+    const quarterTurn = testHelpers.progressToAngle(0.25, 1);
+    const fullTurn = testHelpers.progressToAngle(1, 1);
+
+    expect(quarterTurn).toBeGreaterThan(startAngle);
+    expect(Math.abs(fullTurn - startAngle)).toBeLessThan(1e-9);
+  });
+
+  it("generates deterministic player colors and clamps lap input", () => {
+    const colorZeroA = testHelpers.generatePlayerColor(0);
+    const colorZeroB = testHelpers.generatePlayerColor(0);
+    const colorOne = testHelpers.generatePlayerColor(1);
+
+    expect(colorZeroA).toBe(colorZeroB);
+    expect(colorZeroA).not.toBe(colorOne);
+    expect(testHelpers.sanitizeLapCount("8")).toBe(8);
+    expect(testHelpers.sanitizeLapCount("0")).toBe(1);
+    expect(testHelpers.sanitizeLapCount(999)).toBe(50);
   });
 });

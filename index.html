@@ -20,31 +20,131 @@
           placeholder="Comma-separated player names"
           required
         />
+        <label for="lap-count" class="visually-hidden">Number of laps</label>
+        <input
+          id="lap-count"
+          name="lap-count"
+          class="lap-count-input"
+          type="number"
+          min="1"
+          max="12"
+          step="1"
+          value="1"
+          inputmode="numeric"
+          aria-label="Number of laps (minimum 1)"
+          required
+        />
         <button type="submit" id="start-button">Start Race</button>
       </form>
     </header>
 
     <main id="arena" class="arena">
-      <section id="caster-board" class="caster-board">
-        <p id="caster-text" class="caster-text"></p>
-      </section>
-      <section id="tracks" class="tracks" aria-live="polite">
-        <!-- Tracks rendered by app.js -->
-      </section>
-      <section
-        id="spectator-panel"
-        class="spectator hidden"
-        data-role="spectator-controls"
-        aria-live="polite"
-      >
-        <h2 class="spectator-title">Cheer for Your Horse</h2>
-        <p id="spectator-status" class="spectator-status">Searching for an active race…</p>
-        <div id="cheer-buttons" class="cheer-buttons" role="group" aria-label="Cheer buttons"></div>
+      <section class="arena-layout">
+        <aside id="player-roster" class="player-roster" aria-live="polite">
+          <div id="player-roster-list" class="player-roster-list">
+            <p class="roster-empty">Enter player names to populate the roster.</p>
+          </div>
+        </aside>
+
+        <section id="tracks" class="track-stage" aria-live="polite">
+          <header id="caster-board" class="caster-board">
+            <p id="caster-text" class="caster-text"></p>
+          </header>
+          <div class="track-viewport">
+            <svg
+              id="oval-track-svg"
+              class="oval-track"
+              viewBox="0 0 800 520"
+              role="presentation"
+              aria-hidden="true"
+            >
+              <defs>
+                <linearGradient id="track-fill" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#0a3778" stop-opacity="0.9" />
+                  <stop offset="100%" stop-color="#021126" stop-opacity="0.95" />
+                </linearGradient>
+              </defs>
+              <rect
+                class="track-outer"
+                x="50"
+                y="40"
+                width="700"
+                height="440"
+                rx="210"
+                ry="210"
+                fill="url(#track-fill)"
+                stroke="rgba(255, 255, 255, 0.25)"
+                stroke-width="6"
+              ></rect>
+              <rect
+                class="track-inner"
+                x="170"
+                y="160"
+                width="460"
+                height="200"
+                rx="110"
+                ry="110"
+                fill="rgba(0, 0, 0, 0.25)"
+                stroke="rgba(255, 255, 255, 0.2)"
+                stroke-width="2"
+              ></rect>
+              <rect
+                id="track-middle-path"
+                class="track-middle-path"
+                x="110"
+                y="100"
+                width="580"
+                height="320"
+                rx="160"
+                ry="155"
+                fill="none"
+                stroke="rgba(255, 255, 255, 0.2)"
+                stroke-width="3"
+                stroke-dasharray="18 12"
+                stroke-linecap="round"
+              ></rect>
+              <line
+                class="start-finish-line"
+                x1="400"
+                y1="40"
+                x2="400"
+                y2="160"
+              ></line>
+            </svg>
+            <div id="runner-layer" class="runner-layer" aria-live="polite"></div>
+            <div id="lap-indicator" class="lap-indicator hidden" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <section
+          id="spectator-panel"
+          class="spectator hidden"
+          data-role="spectator-controls"
+          aria-live="polite"
+        >
+          <h2 class="spectator-title">Cheer for Your Horse</h2>
+          <p id="spectator-status" class="spectator-status">Searching for an active race…</p>
+          <div id="cheer-buttons" class="cheer-buttons" role="group" aria-label="Cheer buttons"></div>
+        </section>
       </section>
     </main>
 
-    <div id="countdown" class="countdown hidden" role="dialog" aria-live="assertive" aria-modal="true">
-      <p class="countdown-value">5</p>
+    <div
+      id="countdown"
+      class="countdown hidden"
+      role="dialog"
+      aria-live="assertive"
+      aria-modal="true"
+      aria-describedby="countdown-status"
+    >
+      <div class="countdown-lights" role="img" aria-label="Race start lights">
+        <span class="countdown-light" aria-hidden="true"></span>
+        <span class="countdown-light" aria-hidden="true"></span>
+        <span class="countdown-light" aria-hidden="true"></span>
+        <span class="countdown-light" aria-hidden="true"></span>
+        <span class="countdown-light" aria-hidden="true"></span>
+      </div>
+      <p id="countdown-status" class="countdown-value visually-hidden" aria-live="assertive">5</p>
     </div>
 
     <div id="results-modal" class="results-modal hidden" role="dialog" aria-modal="true" aria-live="assertive">
