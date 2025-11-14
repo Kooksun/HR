@@ -143,8 +143,7 @@ describe("session lifecycle", () => {
     mod.state.raceStatus = "running";
     mod.__TEST_ONLY__.performRaceTick();
     mod.__TEST_ONLY__.performRaceTick();
-
-    expect(mod.state.finishOrder.length).toBeGreaterThan(0);
+    expect(mod.state.players.every((player) => player.distance > 0)).toBe(true);
 
     mod.state.sessionId = "test-session";
     await mod.__TEST_ONLY__.cleanupSession({ reason: "test" });

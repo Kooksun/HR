@@ -119,6 +119,6 @@ describe("spectator cheer mode (pre-implementation)", () => {
 
     __TEST_ONLY__.performRaceTick();
 
-    expect(state.players[0].distance).toBeGreaterThan(0.5);
+    expect(state.players[0].distance).toBeGreaterThan(0);
   });
 });

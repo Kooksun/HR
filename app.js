@@ -70,6 +70,22 @@ const safeQuerySelectorAll = (selector) => {
   }
 };
 
+function resolvePlayerName(candidate, fallback) {
+  if (typeof candidate === "string") {
+    const trimmed = candidate.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+  if (typeof fallback === "string") {
+    const trimmedFallback = fallback.trim();
+    if (trimmedFallback.length > 0) {
+      return trimmedFallback;
+    }
+  }
+  return "Mystery Racer";
+}
+
 function createMysticEffectsState() {
   return {
     freeze: new Map(),
@@ -112,6 +128,12 @@ const selectors = {
   mysticContinue: document.querySelector("#mystic-continue"),
   mysticSlotCells: safeQuerySelectorAll(".mystic-slot__cell"),
 };
+
+const PODIUM_MEDALS = Object.freeze({
+  1: "🥇",
+  2: "🥈",
+  3: "🥉",
+});
 
 const MYSTIC_EFFECTS = Object.freeze([
   Object.freeze({
@@ -1211,7 +1233,11 @@ function updateRosterOrder(orderedPlayers = getPlayersByStanding()) {
       previousRects.set(card, card.getBoundingClientRect());
     }
   });
-  const fragment = document.createDocumentFragment();
+  const fragment =
+    typeof document?.createDocumentFragment === "function"
+      ? document.createDocumentFragment()
+      : null;
+  const target = fragment ?? rosterList;
   let appended = 0;
   orderedPlayers.forEach((player, index) => {
     const card = player.elements?.rosterCard;
@@ -1219,13 +1245,14 @@ function updateRosterOrder(orderedPlayers = getPlayersByStanding()) {
       return;
     }
     card.dataset.standing = String(index + 1);
-    fragment.appendChild(card);
+    target.appendChild(card);
     appended += 1;
   });
-  if (appended === orderedPlayers.length) {
-    rosterList.appendChild(fragment);
-  } else {
+  if (appended !== orderedPlayers.length) {
     return;
+  }
+  if (fragment) {
+    rosterList.appendChild(fragment);
   }
 
   const prefersReducedMotion = Boolean(
@@ -1508,13 +1535,41 @@ function clearSessionCache() {
 
 function playersArrayToSnapshot(playersArray = []) {
   return playersArray.reduce((acc, player, index) => {
-    if (!player?.id) {
+    const candidateId = typeof player?.id === "string" ? player.id : "";
+    const playerId = candidateId.trim().length > 0 ? candidateId : `player-${index}`;
+    acc[playerId] = {
+      name: resolvePlayerName(player?.name, playerId),
+      laneIndex: Number.isFinite(player?.laneIndex) ? player.laneIndex : index,
+      cheerCount: Number.isFinite(player?.cheerCount) ? player.cheerCount : 0,
+    };
+    return acc;
+  }, {});
+}
+
+function normalizePlayersSnapshot(players) {
+  if (!players) {
+    return {};
+  }
+  if (Array.isArray(players)) {
+    return playersArrayToSnapshot(players);
+  }
+  if (typeof players !== "object") {
+    return {};
+  }
+  return Object.entries(players).reduce((acc, [playerId, payload], index) => {
+    if (!playerId) {
       return acc;
     }
-    acc[player.id] = {
-      name: player.name ?? player.id,
-      laneIndex: player.laneIndex ?? index,
-      cheerCount: player.cheerCount ?? 0,
+    const source = payload && typeof payload === "object" ? payload : {};
+    acc[playerId] = {
+      ...source,
+      id: source.id ?? playerId,
+      name: resolvePlayerName(source.name, playerId),
+      laneIndex:
+        typeof source.laneIndex === "number" && Number.isFinite(source.laneIndex)
+          ? source.laneIndex
+          : index,
+      cheerCount: typeof source.cheerCount === "number" ? source.cheerCount : 0,
     };
     return acc;
   }, {});
@@ -1526,7 +1581,7 @@ function startLocalCachePoll() {
     const cached = loadSessionCache();
     if (cached?.sessionId) {
       enterSpectatorMode(cached.sessionId, {
-        players: playersArrayToSnapshot(cached.players),
+        players: normalizePlayersSnapshot(cached.players),
         lapsRequired: cached.lapsRequired ?? state.lapsRequired,
         totalRaceDistance: cached.totalRaceDistance,
       });
@@ -1558,14 +1613,7 @@ function handleBusMessage(event) {
       if (origin === "host" && state.sessionId === sessionId) {
         return;
       }
-      const playersSnapshot = {};
-      players.forEach((player, index) => {
-        playersSnapshot[player.id] = {
-          name: player.name,
-          laneIndex: player.laneIndex ?? index,
-          cheerCount: player.cheerCount ?? 0,
-        };
-      });
+      const playersSnapshot = normalizePlayersSnapshot(players);
       enterSpectatorMode(sessionId, {
         players: playersSnapshot,
         lapsRequired: lapsRequired ?? state.lapsRequired,
@@ -1658,12 +1706,19 @@ function hydratePlayersFromSnapshot(snapshotValue) {
     return;
   }
 
+  const normalizedSnapshot = normalizePlayersSnapshot(snapshotValue);
+  const entries = Object.entries(normalizedSnapshot);
+  if (!entries.length) {
+    return;
+  }
+
   const playersList = Array.isArray(state.players) ? [...state.players] : [];
   const mapped = new Map(playersList.map((player) => [player.id, player]));
 
-  Object.entries(snapshotValue).forEach(([playerId, remote]) => {
+  entries.forEach(([playerId, remote]) => {
     const existing = mapped.get(playerId);
     if (existing) {
+      existing.name = resolvePlayerName(remote.name, existing.name ?? playerId);
       existing.cheerCount = remote.cheerCount ?? existing.cheerCount ?? 0;
       existing.distance = typeof remote.distance === "number" ? remote.distance : existing.distance ?? 0;
       existing.rank = remote.rank ?? existing.rank ?? null;
@@ -1674,7 +1729,7 @@ function hydratePlayersFromSnapshot(snapshotValue) {
         createPlayerState(
           {
             id: playerId,
-            name: remote.name ?? playerId,
+            name: resolvePlayerName(remote.name, playerId),
           },
           remote.laneIndex ?? playersList.length,
         ),
@@ -1734,13 +1789,16 @@ function renderSpectatorButtons() {
   state.cheerButtonRefs.clear();
 
   state.players.forEach((player) => {
+    const displayName = resolvePlayerName(player?.name, player?.id);
     const wrapper = document.createElement("div");
     wrapper.className = "cheer-control";
-    wrapper.style.setProperty("--player-accent", player.accentColor);
+    if (wrapper.style && typeof wrapper.style.setProperty === "function") {
+      wrapper.style.setProperty("--player-accent", player.accentColor);
+    }
 
     const label = document.createElement("span");
     label.className = "cheer-label";
-    label.textContent = player.name;
+    label.textContent = displayName;
 
     const count = document.createElement("span");
     count.className = "cheer-count";
@@ -1751,7 +1809,7 @@ function renderSpectatorButtons() {
     cheerButton.className = "cheer-button";
     cheerButton.dataset.role = "cheer-button";
     cheerButton.dataset.playerId = player.id;
-    cheerButton.setAttribute("aria-label", `Cheer for ${player.name}`);
+    cheerButton.setAttribute("aria-label", `Cheer for ${displayName}`);
     cheerButton.textContent = "응원 👏";
     cheerButton.addEventListener("click", () => handleCheerAction(player.id, 1));
 
@@ -1760,7 +1818,7 @@ function renderSpectatorButtons() {
     hinderButton.className = "hinder-button";
     hinderButton.dataset.role = "hinder-button";
     hinderButton.dataset.playerId = player.id;
-    hinderButton.setAttribute("aria-label", `Hinder ${player.name}`);
+    hinderButton.setAttribute("aria-label", `Hinder ${displayName}`);
     hinderButton.textContent = "방해 👎";
     hinderButton.addEventListener("click", () => handleCheerAction(player.id, -1));
 
@@ -1788,12 +1846,12 @@ function enterSpectatorMode(sessionId, sessionData = {}) {
     state.totalRaceDistance = sessionData.totalRaceDistance;
   }
 
-  const playersSnapshot = sessionData.players ?? {};
+  const playersSnapshot = normalizePlayersSnapshot(sessionData.players);
   state.players = Object.entries(playersSnapshot).map(([playerId, payload], index) =>
     createPlayerState(
       {
         id: playerId,
-        name: payload.name ?? playerId,
+        name: resolvePlayerName(payload.name, playerId),
       },
       payload.laneIndex ?? index,
     ),
@@ -2323,8 +2381,10 @@ function createPlayerState(basePlayer, laneIndex) {
     typeof basePlayer.distance === "number" && Number.isFinite(basePlayer.distance)
       ? basePlayer.distance
       : 0;
+  const safeName = resolvePlayerName(basePlayer?.name, basePlayer?.id);
   return {
     ...basePlayer,
+    name: safeName,
     laneIndex,
     distance: initialDistance,
     cheerCount: 0,
@@ -2385,11 +2445,42 @@ function updateHorsePosition(player) {
 }
 
 function appendResultEntry(player) {
-  if (!selectors.resultsList) {
+  if (!selectors.resultsList || !player) {
     return;
   }
+
+  const rank = Number.isFinite(player.rank) ? player.rank : state.finishOrder.length + 1;
+  const displayName = resolvePlayerName(player.name, player.id);
   const item = document.createElement("li");
-  item.textContent = `${player.rank}등 ${player.name}`;
+  item.className = "results-entry";
+  item.setAttribute("aria-label", `${rank}등 ${displayName}`);
+
+  const medalEmoji = PODIUM_MEDALS[rank];
+  if (medalEmoji) {
+    item.classList.add("results-entry--podium", `results-entry--rank-${rank}`);
+    const medal = document.createElement("span");
+    medal.className = "results-entry__medal";
+    medal.textContent = medalEmoji;
+    medal.setAttribute("aria-hidden", "true");
+    item.appendChild(medal);
+  }
+
+  const rankLabel = document.createElement("span");
+  rankLabel.className = "results-entry__rank";
+  const shouldShowRankText = !medalEmoji;
+  if (shouldShowRankText) {
+    rankLabel.textContent = `${rank}등`;
+  } else {
+    rankLabel.classList.add("results-entry__rank--hidden");
+    rankLabel.setAttribute("aria-hidden", "true");
+  }
+  item.appendChild(rankLabel);
+
+  const name = document.createElement("span");
+  name.className = "results-entry__name";
+  name.textContent = displayName;
+  item.appendChild(name);
+
   selectors.resultsList.appendChild(item);
 }
 
@@ -2714,7 +2805,9 @@ function renderPlayerRoster() {
     card.className = "player-card";
     card.dataset.playerId = player.id;
     card.dataset.standing = String(index + 1);
-    card.style.setProperty("--player-accent", player.accentColor);
+    if (card.style && typeof card.style.setProperty === "function") {
+      card.style.setProperty("--player-accent", player.accentColor);
+    }
 
     const number = document.createElement("span");
     number.className = "player-number";
@@ -2763,7 +2856,9 @@ function renderRunnerLayer() {
     const runner = document.createElement("div");
     runner.className = "runner-marker";
     runner.dataset.playerId = player.id;
-    runner.style.setProperty("--player-accent", player.accentColor);
+    if (runner.style && typeof runner.style.setProperty === "function") {
+      runner.style.setProperty("--player-accent", player.accentColor);
+    }
 
     const emoji = document.createElement("span");
     emoji.className = "runner-emoji";

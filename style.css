@@ -806,8 +806,70 @@ body.fantasy-mode .spectator {
 
 .results-content ol li {
   margin-bottom: 0.5rem;
+}
+
+.results-entry {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: 12px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.results-entry__medal {
+  font-size: 1.6rem;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.35));
+}
+
+.results-entry__rank {
+  font-variant-numeric: tabular-nums;
+  min-width: 3rem;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.results-entry__rank--hidden {
+  display: none;
+}
+
+.results-entry__name {
+  font-weight: 700;
+}
+
+.results-entry--podium {
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 1.05rem;
+}
+
+.results-entry--podium .results-entry__name {
+  font-size: 1.1rem;
+}
+
+.results-entry--rank-1 {
+  background: linear-gradient(120deg, rgba(255, 215, 0, 0.2), rgba(255, 255, 255, 0.04));
+}
+
+.results-entry--rank-1 .results-entry__name {
+  color: #ffe066;
+}
+
+.results-entry--rank-2 {
+  background: linear-gradient(120deg, rgba(180, 194, 207, 0.2), rgba(255, 255, 255, 0.04));
+}
+
+.results-entry--rank-2 .results-entry__name {
+  color: #e0e7ff;
+}
+
+.results-entry--rank-3 {
+  background: linear-gradient(120deg, rgba(205, 127, 50, 0.25), rgba(255, 255, 255, 0.04));
+}
+
+.results-entry--rank-3 .results-entry__name {
+  color: #ffd6a5;
 }
 
 .results-content button {
