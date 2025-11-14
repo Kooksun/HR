@@ -120,7 +120,10 @@
               ></line>
             </svg>
             <div id="runner-layer" class="runner-layer" aria-live="polite"></div>
-            <div id="lap-indicator" class="lap-indicator hidden" aria-live="polite"></div>
+            <div class="track-center-stack" aria-live="off">
+              <div id="lap-indicator" class="lap-indicator hidden" aria-live="polite"></div>
+              <div id="race-timer" class="race-timer" aria-label="Race timer">00:00.0</div>
+            </div>
           </div>
         </section>
 
@@ -158,6 +161,10 @@
     <div id="results-modal" class="results-modal hidden" role="dialog" aria-modal="true" aria-live="assertive">
       <div class="results-content">
         <h2>Race Results</h2>
+        <p id="first-place-time" class="first-place-time hidden">
+          Winning time:
+          <span id="first-place-time-value" class="first-place-time__value">0:00.000</span>
+        </p>
         <ol id="results-list"></ol>
         <button id="results-close">Close</button>
       </div>

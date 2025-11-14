@@ -20,6 +20,7 @@ import {
  */
 
 const TICK_MS = 500;
+const RACE_TIMER_INTERVAL_MS = 100;
 const CHEER_BOOST_FACTOR = 0.0004;
 const BASE_LAP_DISTANCE = 1.5;
 const DEFAULT_LAPS_REQUIRED = 1;
@@ -82,6 +83,9 @@ const selectors = {
   trackSvg: document.querySelector("#oval-track-svg"),
   trackPath: document.querySelector("#track-middle-path"),
   lapIndicator: document.querySelector("#lap-indicator"),
+  raceTimer: document.querySelector("#race-timer"),
+  firstPlaceTime: document.querySelector("#first-place-time"),
+  firstPlaceTimeValue: document.querySelector("#first-place-time-value"),
   trackGradientStops: document.querySelectorAll("#track-fill stop"),
 };
 
@@ -124,6 +128,10 @@ const state = {
   trackGeometry: TRACK_GEOMETRY,
   trackPathLength: 0,
   trackStartOffset: 0,
+  raceTimerIntervalId: null,
+  raceTimerStartTime: null,
+  raceTimerElapsedMs: 0,
+  firstPlaceFinishMs: null,
 };
 
 if (typeof window !== "undefined") {
@@ -1230,6 +1238,7 @@ async function cleanupSession({ reason = "manual", publish = true, resetUi = tru
 
     cancelCountdown();
     stopRaceLoop();
+    stopRaceTimer();
     clearPlayersSubscription();
     stopSessionBroadcastLoop();
 
@@ -1280,6 +1289,7 @@ async function cleanupSession({ reason = "manual", publish = true, resetUi = tru
     }
 
     renderRaceScene();
+    resetRaceTimer();
     selectors.cheerButtons?.replaceChildren?.();
     selectors.resultsList?.replaceChildren?.();
     selectors.countdownModal?.classList.add("hidden");
@@ -1339,6 +1349,89 @@ function stopRaceLoop() {
   }
   state.accumulator = 0;
   state.previousTimestamp = null;
+}
+
+function getNowMs() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function formatRaceTimerValue(elapsedMs = 0) {
+  const safeElapsed = Math.max(0, Math.floor(elapsedMs));
+  const minutes = Math.floor(safeElapsed / 60_000);
+  const seconds = Math.floor((safeElapsed % 60_000) / 1_000);
+  const tenths = Math.floor((safeElapsed % 1_000) / 100);
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
+}
+
+function formatFirstPlaceTime(elapsedMs = 0) {
+  const safeElapsed = Math.max(0, Math.floor(elapsedMs));
+  const minutes = Math.floor(safeElapsed / 60_000);
+  const seconds = Math.floor((safeElapsed % 60_000) / 1_000);
+  const milliseconds = safeElapsed % 1_000;
+  return `${minutes}:${String(seconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
+}
+
+function updateRaceTimerDisplay(elapsedMs = state.raceTimerElapsedMs) {
+  if (!selectors.raceTimer) {
+    return;
+  }
+  selectors.raceTimer.textContent = formatRaceTimerValue(elapsedMs);
+}
+
+function updateFirstPlaceTimeDisplay() {
+  if (!selectors.firstPlaceTime || !selectors.firstPlaceTimeValue) {
+    return;
+  }
+  if (!Number.isFinite(state.firstPlaceFinishMs)) {
+    selectors.firstPlaceTime.classList.add("hidden");
+    selectors.firstPlaceTimeValue.textContent = "";
+    return;
+  }
+  selectors.firstPlaceTimeValue.textContent = formatFirstPlaceTime(state.firstPlaceFinishMs);
+  selectors.firstPlaceTime.classList.remove("hidden");
+}
+
+function stopRaceTimer() {
+  if (state.raceTimerIntervalId !== null) {
+    globalThis.clearInterval(state.raceTimerIntervalId);
+    state.raceTimerIntervalId = null;
+  }
+  if (state.raceTimerStartTime != null) {
+    state.raceTimerElapsedMs = getNowMs() - state.raceTimerStartTime;
+    state.raceTimerStartTime = null;
+  }
+  updateRaceTimerDisplay();
+}
+
+function resetRaceTimer() {
+  if (state.raceTimerIntervalId !== null) {
+    globalThis.clearInterval(state.raceTimerIntervalId);
+    state.raceTimerIntervalId = null;
+  }
+  state.raceTimerStartTime = null;
+  state.raceTimerElapsedMs = 0;
+  state.firstPlaceFinishMs = null;
+  updateRaceTimerDisplay(0);
+  updateFirstPlaceTimeDisplay();
+}
+
+function startRaceTimer() {
+  if (state.raceTimerIntervalId !== null) {
+    globalThis.clearInterval(state.raceTimerIntervalId);
+  }
+  state.raceTimerElapsedMs = 0;
+  state.raceTimerStartTime = getNowMs();
+  updateRaceTimerDisplay(0);
+  state.raceTimerIntervalId = globalThis.setInterval(() => {
+    if (state.raceTimerStartTime == null) {
+      return;
+    }
+    state.raceTimerElapsedMs = getNowMs() - state.raceTimerStartTime;
+    updateRaceTimerDisplay(state.raceTimerElapsedMs);
+  }, RACE_TIMER_INTERVAL_MS);
 }
 
 function updateCountdownDisplay(value) {
@@ -1605,6 +1698,15 @@ function performRaceTick() {
       player.finishTick = state.tick;
       const rank = state.finishOrder.length + 1;
       player.rank = rank;
+      if (rank === 1) {
+        const now = getNowMs();
+        if (state.raceTimerStartTime != null) {
+          state.firstPlaceFinishMs = Math.max(0, Math.round(now - state.raceTimerStartTime));
+        } else {
+          state.firstPlaceFinishMs = Math.max(0, Math.round(state.raceTimerElapsedMs ?? 0));
+        }
+        updateFirstPlaceTimeDisplay();
+      }
       state.finishOrder.push(player);
       appendResultEntry(player);
       if (player.elements.runner) {
@@ -1762,6 +1864,8 @@ function performRaceTick() {
 function finishRace() {
   state.raceStatus = "finished";
   stopRaceLoop();
+  stopRaceTimer();
+  updateFirstPlaceTimeDisplay();
 
   selectors.resultsModal?.classList.remove("hidden");
   enableHostControls();
@@ -1990,6 +2094,7 @@ async function handleStart(event) {
   leaveSpectatorMode();
   cancelCountdown();
   stopRaceLoop();
+  resetRaceTimer();
   clearPlayersSubscription();
   stopSessionBroadcastLoop();
   clearCasterText();
@@ -2051,6 +2156,7 @@ async function handleStart(event) {
       state.countdownCancel = null;
       selectors.countdownModal?.classList.add("hidden");
       logSession("countdown:complete");
+      startRaceTimer();
       updateSessionPatch({ status: "running" });
       logSession("race:start", { tickIntervalMs: TICK_MS, playerCount: state.players.length });
       updateCasterText(`모든 선수들이 지금 힘차게 출발했습니다!`, {
@@ -2106,6 +2212,7 @@ function init() {
   selectors.resultsModal?.classList.add("hidden");
   applyLapsRequired(state.lapsRequired);
   initializeTrackPath();
+  resetRaceTimer();
   renderRaceScene();
 
   bootstrapFirebase()
