@@ -63,6 +63,7 @@ const selectors = {
   playerInput: document.querySelector("#player-names"),
   lapCountInput: document.querySelector("#lap-count"),
   startButton: document.querySelector("#start-button"),
+  fantasyToggle: document.querySelector("#fantasy-mode-toggle"),
   tracksContainer: document.querySelector("#tracks"),
   countdownModal: document.querySelector("#countdown"),
   countdownValue: document.querySelector(".countdown-value"),
@@ -81,12 +82,18 @@ const selectors = {
   trackSvg: document.querySelector("#oval-track-svg"),
   trackPath: document.querySelector("#track-middle-path"),
   lapIndicator: document.querySelector("#lap-indicator"),
+  trackGradientStops: document.querySelectorAll("#track-fill stop"),
 };
 
 const state = {
   players: [],
   lapsRequired: DEFAULT_LAPS_REQUIRED,
   mode: ClientMode.HOST,
+  fantasyMode: false,
+  fantasyCheckpoint: null,
+  fantasyCheckpointTriggered: false,
+  fantasyCheckpointElement: null,
+  fantasyCheckpointPendingLap: null,
   sessionId: null,
   firebaseApp: null,
   database: null,
@@ -122,6 +129,22 @@ const state = {
 if (typeof window !== "undefined") {
   window.__APP_STATE__ = state;
 }
+
+const THEME_PALETTE = Object.freeze({
+  default: {
+    trackGradientStart: "#0a3778",
+    trackGradientEnd: "#021126",
+  },
+  fantasy: {
+    trackGradientStart: "#7c3aed",
+    trackGradientEnd: "#2d0a4a",
+  },
+});
+
+const FANTASY_CHECKPOINT_WINDOWS = Object.freeze([
+  Object.freeze({ min: 0.35, max: 0.45 }),
+  Object.freeze({ min: 0.55, max: 0.65 }),
+]);
 
 const GOLDEN_RATIO_CONJUGATE = 0.6180339887498949;
 
@@ -198,6 +221,207 @@ function calculateLapMetrics(distance, laps = state.lapsRequired) {
     angleRadians,
     angleDegrees: radiansToDegrees(angleRadians),
   };
+}
+
+function getPointOnTrackByLapProgress(lapProgress = 0) {
+  const clampedProgress = clamp(Number(lapProgress) || 0, 0, 1);
+  const path = selectors.trackPath;
+  const geometry = state.trackGeometry ?? TRACK_GEOMETRY;
+  if (path && typeof path.getPointAtLength === "function" && state.trackPathLength > 0) {
+    const totalLength = state.trackPathLength;
+    const startOffset = state.trackStartOffset ?? 0;
+    const direction = -1;
+    const offsetDistance = (direction * clampedProgress * totalLength) % totalLength;
+    const lengthOnPath = (startOffset + offsetDistance + totalLength) % totalLength;
+    return path.getPointAtLength(lengthOnPath);
+  }
+  const laps = Math.max(DEFAULT_LAPS_REQUIRED, state.lapsRequired || DEFAULT_LAPS_REQUIRED);
+  const normalizedProgress = laps > 0 ? clampedProgress / laps : clampedProgress;
+  const angle = progressToAngle(normalizedProgress, laps);
+  return angleToPoint(angle, geometry);
+}
+
+function updateTrackTheme(palette = THEME_PALETTE.default) {
+  if (!palette || !selectors.trackGradientStops || selectors.trackGradientStops.length === 0) {
+    return;
+  }
+  const [startStop, endStop] = Array.from(selectors.trackGradientStops);
+  if (startStop && palette.trackGradientStart) {
+    startStop.setAttribute("stop-color", palette.trackGradientStart);
+  }
+  if (endStop && palette.trackGradientEnd) {
+    endStop.setAttribute("stop-color", palette.trackGradientEnd);
+  }
+}
+
+function applyFantasyMode(enabled) {
+  const isEnabled = Boolean(enabled);
+  state.fantasyMode = isEnabled;
+
+  if (typeof document !== "undefined" && document.body) {
+    document.body.classList.toggle("fantasy-mode", isEnabled);
+  }
+
+  selectors.fantasyToggle?.setAttribute("aria-pressed", isEnabled ? "true" : "false");
+  updateTrackTheme(isEnabled ? THEME_PALETTE.fantasy : THEME_PALETTE.default);
+  if (isEnabled) {
+    resetFantasyCheckpointForRace();
+  } else {
+    clearFantasyCheckpoint();
+  }
+}
+
+function getRandomFantasyCheckpointFraction() {
+  const windows = FANTASY_CHECKPOINT_WINDOWS;
+  const selectedWindow =
+    Array.isArray(windows) && windows.length > 0
+      ? windows[Math.floor(Math.random() * windows.length)]
+      : { min: 0.4, max: 0.6 };
+  const min = Number.isFinite(selectedWindow.min) ? selectedWindow.min : 0.4;
+  const max = Number.isFinite(selectedWindow.max) ? selectedWindow.max : 0.6;
+  const [lower, upper] = min <= max ? [min, max] : [max, min];
+  const span = Math.max(0, upper - lower);
+  return clamp(lower + Math.random() * span, lower, upper);
+}
+
+function refreshFantasyCheckpointMetrics() {
+  if (!state.fantasyCheckpoint) {
+    return;
+  }
+  const laps = Math.max(DEFAULT_LAPS_REQUIRED, state.lapsRequired || DEFAULT_LAPS_REQUIRED);
+  const totalRaceDistance = getRaceDistance(laps);
+  const lapIndexRaw =
+    typeof state.fantasyCheckpoint.lapIndex === "number"
+      ? state.fantasyCheckpoint.lapIndex
+      : Number.parseInt(state.fantasyCheckpoint.lapIndex ?? "1", 10);
+  const lapIndex = clamp(Number.isFinite(lapIndexRaw) ? Math.floor(lapIndexRaw) : 1, 1, laps);
+  const lapFraction = clamp(state.fantasyCheckpoint.lapFraction ?? 0.5, 0, 1);
+  const lapDistance = laps > 0 ? totalRaceDistance / laps : totalRaceDistance;
+  const absoluteDistance = lapDistance * (lapIndex - 1 + lapFraction);
+  const normalizedProgress = totalRaceDistance > 0 ? absoluteDistance / totalRaceDistance : 0;
+  state.fantasyCheckpoint.lapIndex = lapIndex;
+  state.fantasyCheckpoint.absoluteDistance = absoluteDistance;
+  state.fantasyCheckpoint.normalizedProgress = normalizedProgress;
+  state.fantasyCheckpoint.angleRadians = progressToAngle(normalizedProgress, laps);
+}
+
+function clearFantasyCheckpoint() {
+  state.fantasyCheckpoint = null;
+  state.fantasyCheckpointTriggered = false;
+  state.fantasyCheckpointPendingLap = null;
+  removeFantasyCheckpointMarker();
+}
+
+function setFantasyCheckpointForLap(lapIndex = 1) {
+  if (!state.fantasyMode) {
+    return;
+  }
+  const laps = Math.max(DEFAULT_LAPS_REQUIRED, state.lapsRequired || DEFAULT_LAPS_REQUIRED);
+  const safeLapIndex = clamp(Math.floor(lapIndex) || 1, 1, laps);
+  state.fantasyCheckpointPendingLap = null;
+  state.fantasyCheckpoint = {
+    lapIndex: safeLapIndex,
+    lapFraction: getRandomFantasyCheckpointFraction(),
+  };
+  state.fantasyCheckpointTriggered = false;
+  refreshFantasyCheckpointMetrics();
+  renderFantasyCheckpointMarker();
+}
+
+function resetFantasyCheckpointForRace() {
+  if (!state.fantasyMode) {
+    clearFantasyCheckpoint();
+    return;
+  }
+  setFantasyCheckpointForLap(1);
+}
+
+function removeFantasyCheckpointMarker() {
+  if (state.fantasyCheckpointElement) {
+    state.fantasyCheckpointElement.remove();
+    state.fantasyCheckpointElement = null;
+  }
+}
+
+function renderFantasyCheckpointMarker() {
+  if (!state.fantasyMode || !state.fantasyCheckpoint) {
+    removeFantasyCheckpointMarker();
+    return;
+  }
+  const runnerLayer = selectors.runnerLayer;
+  if (!runnerLayer) {
+    return;
+  }
+  const geometry = state.trackGeometry ?? TRACK_GEOMETRY;
+  const point = getPointOnTrackByLapProgress(state.fantasyCheckpoint.lapFraction ?? 0.5);
+  const xPercent = (point.x / geometry.viewBoxWidth) * 100;
+  const yPercent = (point.y / geometry.viewBoxHeight) * 100;
+
+  let marker = state.fantasyCheckpointElement;
+  if (!marker) {
+    marker = document.createElement("div");
+    marker.className = "checkpoint-marker";
+    marker.setAttribute("role", "presentation");
+    const spark = document.createElement("span");
+    spark.className = "checkpoint-spark";
+    const label = document.createElement("span");
+    label.className = "checkpoint-label";
+    label.textContent = "Mystic Point";
+    marker.append(spark, label);
+    state.fantasyCheckpointElement = marker;
+  }
+  if (marker.parentElement !== runnerLayer) {
+    runnerLayer.appendChild(marker);
+  }
+
+  marker.style.left = `${xPercent}%`;
+  marker.style.top = `${yPercent}%`;
+  marker.classList.toggle("checkpoint-marker--triggered", Boolean(state.fantasyCheckpointTriggered));
+}
+
+function maybeHandleFantasyCheckpoint(player) {
+  if (
+    !state.fantasyMode ||
+    !state.fantasyCheckpoint ||
+    state.fantasyCheckpointTriggered ||
+    !player
+  ) {
+    return false;
+  }
+  const checkpointDistance = state.fantasyCheckpoint.absoluteDistance ?? null;
+  if (!Number.isFinite(checkpointDistance)) {
+    return false;
+  }
+  if (player.distance >= checkpointDistance) {
+    state.fantasyCheckpointTriggered = true;
+    const nextLap = state.fantasyCheckpoint.lapIndex + 1;
+    const laps = Math.max(DEFAULT_LAPS_REQUIRED, state.lapsRequired || DEFAULT_LAPS_REQUIRED);
+    state.fantasyCheckpointPendingLap = nextLap <= laps ? nextLap : null;
+    if (state.fantasyCheckpointElement) {
+      state.fantasyCheckpointElement.classList.add("checkpoint-marker--triggered");
+    }
+    updateCasterText(
+      `판타지 체크포인트 돌파! <span class="caster-name">${
+        player.name
+      }</span> 선수가 신비한 지점을 지나갑니다!`,
+      { lock: 1500, force: true },
+    );
+    return true;
+  }
+  return false;
+}
+
+function maybeActivatePendingFantasyCheckpoint(player) {
+  if (!state.fantasyMode || !state.fantasyCheckpointPendingLap || !player) {
+    return false;
+  }
+  const targetLap = state.fantasyCheckpointPendingLap;
+  const currentLapNumber = (player.lapsCompleted ?? 0) + 1;
+  if (currentLapNumber >= targetLap) {
+    setFantasyCheckpointForLap(targetLap);
+    return true;
+  }
+  return false;
 }
 
 function getPlayerInitial(name) {
@@ -367,6 +591,10 @@ function applyLapsRequired(nextValue) {
     selectors.lapCountInput.value = String(sanitized);
   }
   updateCentralLapIndicator();
+  if (state.fantasyMode && state.fantasyCheckpoint) {
+    refreshFantasyCheckpointMetrics();
+    renderFantasyCheckpointMarker();
+  }
   return sanitized;
 }
 
@@ -416,6 +644,9 @@ function initializeTrackPath() {
     }
   }
   state.trackStartOffset = bestOffset;
+  if (state.fantasyMode && state.fantasyCheckpoint) {
+    renderFantasyCheckpointMarker();
+  }
 }
 
 function logSession(event, payload = {}) {
@@ -1361,6 +1592,8 @@ function performRaceTick() {
     player.distance = Math.min(totalRaceDistance, player.distance + totalStep);
 
     const lapMetrics = applyLapMetricsToPlayer(player);
+    const checkpointActivated = maybeActivatePendingFantasyCheckpoint(player);
+    const checkpointTriggered = maybeHandleFantasyCheckpoint(player);
 
     updateHorsePosition(player);
     if (player.elements.cheerBadge) {
@@ -1412,6 +1645,9 @@ function performRaceTick() {
       lapProgress: Number(player.lapProgress.toFixed(4)),
       angleDeg: Number(player.angleDegrees.toFixed(2)),
     });
+    if (checkpointTriggered) {
+      announcementMade = true;
+    }
   });
 
   const orderedPlayers = getPlayersByStanding();
@@ -1700,6 +1936,7 @@ function renderRaceScene() {
   renderPlayerRoster();
   renderRunnerLayer();
   updateCentralLapIndicator();
+  renderFantasyCheckpointMarker();
 }
 
 
@@ -1773,6 +2010,7 @@ async function handleStart(event) {
       : Date.now();
   state.rng = createRng(state.seed);
   state.raceStatus = "pending";
+  resetFantasyCheckpointForRace();
 
   if (selectors.resultsList) {
     selectors.resultsList.innerHTML = "";
@@ -1829,6 +2067,9 @@ function registerEventListeners() {
   selectors.lapCountInput?.addEventListener("change", (event) => {
     applyLapsRequired(event?.target?.value ?? state.lapsRequired);
   });
+  selectors.fantasyToggle?.addEventListener("click", () => {
+    applyFantasyMode(!state.fantasyMode);
+  });
   selectors.resultsClose?.addEventListener("click", async () => {
     if (state.mode === ClientMode.HOST) {
       updateSessionPatch({ status: "finished" });
@@ -1860,6 +2101,7 @@ function init() {
 
   setupBroadcastChannel();
   registerEventListeners();
+  applyFantasyMode(state.fantasyMode);
   selectors.countdownModal?.classList.add("hidden");
   selectors.resultsModal?.classList.add("hidden");
   applyLapsRequired(state.lapsRequired);
