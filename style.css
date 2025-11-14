@@ -565,6 +565,121 @@ body.fantasy-mode .checkpoint-marker {
   letter-spacing: 0.05em;
 }
 
+.mystic-modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(2, 6, 23, 0.82);
+  backdrop-filter: blur(6px);
+  z-index: 140;
+}
+
+.mystic-card {
+  width: min(90vw, 440px);
+  padding: 2rem 2.25rem;
+  border-radius: 20px;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  background: linear-gradient(145deg, rgba(5, 17, 38, 0.95), rgba(8, 30, 64, 0.9));
+}
+
+body.fantasy-mode .mystic-card {
+  background: linear-gradient(145deg, rgba(37, 8, 58, 0.95), rgba(73, 17, 115, 0.9));
+}
+
+.mystic-card__title {
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.mystic-card__status {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #f8fafc;
+  min-height: 2.5rem;
+}
+
+.mystic-slot {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  margin: 1.5rem auto;
+}
+
+.mystic-slot__cell {
+  width: 64px;
+  height: 92px;
+  border-radius: 16px;
+  background: rgba(1, 7, 18, 0.85);
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  box-shadow:
+    0 10px 22px rgba(0, 0, 0, 0.45),
+    inset 0 0 12px rgba(255, 255, 255, 0.08);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mystic-slot__cell--active {
+  border-color: #ffd166;
+  box-shadow:
+    0 16px 28px rgba(0, 0, 0, 0.5),
+    inset 0 0 16px rgba(255, 209, 102, 0.35);
+  transform: translateY(-6px);
+}
+
+.mystic-card__result {
+  margin: 1rem 0;
+  min-height: 1.5rem;
+  font-size: 1rem;
+  color: rgba(248, 250, 252, 0.9);
+}
+
+.mystic-card__button {
+  width: min(100%, 240px);
+  margin: 0 auto;
+  padding: 0.85rem 1.25rem;
+  border-radius: 999px;
+  border: none;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  background: linear-gradient(120deg, #ffd166, #06d6a0);
+  color: #03141f;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.mystic-card__button:hover,
+.mystic-card__button:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(255, 209, 102, 0.4);
+}
+
+.mystic-card__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+  transform: none;
+}
+
+.mystic-card__button:focus-visible {
+  outline: 3px solid #ffd166;
+  outline-offset: 3px;
+}
+
 .spectator {
   width: 100%;
   padding: clamp(1rem, 3vw, 2rem);

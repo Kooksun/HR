@@ -170,6 +170,27 @@
       </div>
     </div>
 
+    <div
+      id="mystic-modal"
+      class="mystic-modal hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-live="assertive"
+      aria-labelledby="mystic-title"
+    >
+      <div class="mystic-card">
+        <p id="mystic-title" class="mystic-card__title">Mystic Fate</p>
+        <p id="mystic-status" class="mystic-card__status">Awaiting the mystic point…</p>
+        <div class="mystic-slot" role="img" aria-label="Mystic slot machine">
+          <span class="mystic-slot__cell" data-position="left">A</span>
+          <span class="mystic-slot__cell" data-position="center">B</span>
+          <span class="mystic-slot__cell" data-position="right">C</span>
+        </div>
+        <p id="mystic-result" class="mystic-card__result">Roll the slots to decide the fate.</p>
+        <button id="mystic-continue" class="mystic-card__button" disabled>Continue</button>
+      </div>
+    </div>
+
     <!-- firebase-config.js is gitignored; populate window.__FIREBASE_CONFIG__ before app.js loads -->
     <script src="./firebase-config.js"></script>
     <script type="module" src="./app.js"></script>

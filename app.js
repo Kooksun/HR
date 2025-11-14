@@ -59,6 +59,25 @@ const cancelFrame =
     ? (frameId) => globalThis.cancelAnimationFrame(frameId)
     : (frameId) => globalThis.clearTimeout(frameId);
 
+const safeQuerySelectorAll = (selector) => {
+  if (typeof document === "undefined" || typeof document.querySelectorAll !== "function") {
+    return [];
+  }
+  try {
+    return document.querySelectorAll(selector);
+  } catch {
+    return [];
+  }
+};
+
+function createMysticEffectsState() {
+  return {
+    freeze: new Map(),
+    boost: new Map(),
+    cheerReverts: new Map(),
+  };
+}
+
 const selectors = {
   hostForm: document.querySelector("#host-form"),
   playerInput: document.querySelector("#player-names"),
@@ -68,7 +87,7 @@ const selectors = {
   tracksContainer: document.querySelector("#tracks"),
   countdownModal: document.querySelector("#countdown"),
   countdownValue: document.querySelector(".countdown-value"),
-  countdownLights: document.querySelectorAll(".countdown-light"),
+  countdownLights: safeQuerySelectorAll(".countdown-light"),
   resultsModal: document.querySelector("#results-modal"),
   resultsList: document.querySelector("#results-list"),
   resultsClose: document.querySelector("#results-close"),
@@ -86,8 +105,72 @@ const selectors = {
   raceTimer: document.querySelector("#race-timer"),
   firstPlaceTime: document.querySelector("#first-place-time"),
   firstPlaceTimeValue: document.querySelector("#first-place-time-value"),
-  trackGradientStops: document.querySelectorAll("#track-fill stop"),
+  trackGradientStops: safeQuerySelectorAll("#track-fill stop"),
+  mysticModal: document.querySelector("#mystic-modal"),
+  mysticStatus: document.querySelector("#mystic-status"),
+  mysticResult: document.querySelector("#mystic-result"),
+  mysticContinue: document.querySelector("#mystic-continue"),
+  mysticSlotCells: safeQuerySelectorAll(".mystic-slot__cell"),
 };
+
+const MYSTIC_EFFECTS = Object.freeze([
+  Object.freeze({
+    id: "swap_positions",
+    slotLabel: "↔︎",
+    title: "운명 전환",
+    description: "1위와 꼴찌의 위치가 즉시 뒤바뀝니다.",
+  }),
+  Object.freeze({
+    id: "freeze_leader",
+    slotLabel: "⏸",
+    title: "선두 봉인",
+    description: "현재 1위가 1초 동안 움직이지 못합니다.",
+  }),
+  Object.freeze({
+    id: "boost_leader",
+    slotLabel: "⚡️",
+    title: "아케인 부스트",
+    description: "현재 1위가 2초 동안 강력한 가속을 얻습니다.",
+  }),
+  Object.freeze({
+    id: "cheer_plus",
+    slotLabel: "+20",
+    title: "응원 점수 플러스",
+    description: "응원 점수 20점을 즉시 얻고 이번 랩이 끝나면 다시 차감됩니다.",
+  }),
+  Object.freeze({
+    id: "cheer_minus",
+    slotLabel: "−20",
+    title: "응원 점수 마이너스",
+    description: "응원 점수 20점을 즉시 잃고 이번 랩이 끝나면 복구됩니다.",
+  }),
+  Object.freeze({
+    id: "no_effect",
+    slotLabel: "…",
+    title: "아무 일도 없다",
+    description: "신비한 기운이 안정되어 아무 변화도 없습니다.",
+  }),
+  Object.freeze({
+    id: "jump_forward",
+    slotLabel: "↗︎",
+    title: "앞점프",
+    description: "현재 랩의 7%를 즉시 앞으로 나아갑니다.",
+  }),
+  Object.freeze({
+    id: "jump_backward",
+    slotLabel: "↘︎",
+    title: "뒤점프",
+    description: "현재 랩의 7%만큼 뒤로 밀려납니다.",
+  }),
+  Object.freeze({
+    id: "freeze_top_three",
+    slotLabel: "☠️",
+    title: "같이 죽자",
+    description: "1~3등이 1초간 동시에 멈춥니다.",
+  }),
+]);
+
+const DEFAULT_MYSTIC_OPTIONS = MYSTIC_EFFECTS;
 
 const state = {
   players: [],
@@ -106,6 +189,8 @@ const state = {
   tick: 0,
   raceStatus: "idle",
   finishOrder: [],
+  mysticPauseActive: false,
+  mysticPauseContext: null,
   casterAnnouncements: new Set(),
   previousRanking: [],
   casterLock: false,
@@ -132,6 +217,12 @@ const state = {
   raceTimerStartTime: null,
   raceTimerElapsedMs: 0,
   firstPlaceFinishMs: null,
+  mysticOptions: [...DEFAULT_MYSTIC_OPTIONS],
+  mysticSelection: null,
+  mysticSlotIntervalId: null,
+  mysticSlotTimeoutId: null,
+  mysticSlotCurrentIndex: 0,
+  mysticEffects: createMysticEffectsState(),
 };
 
 if (typeof window !== "undefined") {
@@ -153,6 +244,10 @@ const FANTASY_CHECKPOINT_WINDOWS = Object.freeze([
   Object.freeze({ min: 0.35, max: 0.45 }),
   Object.freeze({ min: 0.55, max: 0.65 }),
 ]);
+
+const MYSTIC_FREEZE_DURATION_MS = 1_000;
+const MYSTIC_BOOST_DURATION_MS = 2_000;
+const MYSTIC_BOOST_MULTIPLIER = 1.8;
 
 const GOLDEN_RATIO_CONJUGATE = 0.6180339887498949;
 
@@ -406,16 +501,17 @@ function maybeHandleFantasyCheckpoint(player) {
     const laps = Math.max(DEFAULT_LAPS_REQUIRED, state.lapsRequired || DEFAULT_LAPS_REQUIRED);
     state.fantasyCheckpointPendingLap = nextLap <= laps ? nextLap : null;
     if (state.fantasyCheckpointElement) {
-      state.fantasyCheckpointElement.classList.add("checkpoint-marker--triggered");
-    }
-    updateCasterText(
-      `판타지 체크포인트 돌파! <span class="caster-name">${
-        player.name
-      }</span> 선수가 신비한 지점을 지나갑니다!`,
-      { lock: 1500, force: true },
-    );
-    return true;
+    state.fantasyCheckpointElement.classList.add("checkpoint-marker--triggered");
   }
+  updateCasterText(
+    `판타지 체크포인트 돌파! <span class="caster-name">${
+      player.name
+    }</span> 선수가 신비한 지점을 지나갑니다!`,
+    { lock: 1500, force: true },
+  );
+  pauseRaceForMysticPoint(player);
+  return true;
+}
   return false;
 }
 
@@ -430,6 +526,611 @@ function maybeActivatePendingFantasyCheckpoint(player) {
     return true;
   }
   return false;
+}
+
+function getMysticEffectOptions() {
+  if (Array.isArray(state.mysticOptions) && state.mysticOptions.length > 0) {
+    return state.mysticOptions;
+  }
+  return [...DEFAULT_MYSTIC_OPTIONS];
+}
+
+function clearMysticSlotEngines() {
+  if (state.mysticSlotIntervalId !== null) {
+    globalThis.clearInterval(state.mysticSlotIntervalId);
+    state.mysticSlotIntervalId = null;
+  }
+  if (state.mysticSlotTimeoutId !== null) {
+    globalThis.clearTimeout(state.mysticSlotTimeoutId);
+    state.mysticSlotTimeoutId = null;
+  }
+}
+
+function updateMysticSlotCellsFromIndex(startIndex = 0) {
+  const cells = selectors.mysticSlotCells;
+  const options = getMysticEffectOptions();
+  if (!cells || cells.length === 0 || options.length === 0) {
+    return;
+  }
+  const baseIndex = Number.isFinite(startIndex) ? startIndex : 0;
+  cells.forEach((cell, offset) => {
+    const optionIndex = (baseIndex + offset) % options.length;
+    const option = options[optionIndex];
+    const label =
+      option?.slotLabel ?? option?.title?.charAt(0) ?? option?.id?.charAt(0) ?? "?";
+    cell.textContent = label;
+    if (option?.title) {
+      cell.setAttribute("aria-label", option.title);
+    }
+    cell.classList.toggle("mystic-slot__cell--active", offset === 1);
+  });
+}
+
+function showMysticSlotResult(option) {
+  const cells = selectors.mysticSlotCells;
+  if (!cells || cells.length === 0) {
+    return;
+  }
+  cells.forEach((cell) => {
+    const label = option?.slotLabel ?? option?.title ?? option?.id ?? "?";
+    cell.textContent = label;
+    if (option?.title) {
+      cell.setAttribute("aria-label", option.title);
+    }
+    cell.classList.add("mystic-slot__cell--active");
+  });
+}
+
+function showMysticModal(playerName) {
+  selectors.mysticModal?.classList.remove("hidden");
+  setMysticStatusMessage(
+    playerName ? `${playerName}의 운명을 점치는 중…` : "Mystic energy is converging…",
+  );
+  if (selectors.mysticResult) {
+    selectors.mysticResult.textContent = "Spinning fate to decide the next effect…";
+  }
+  if (selectors.mysticContinue) {
+    selectors.mysticContinue.setAttribute("disabled", "true");
+  }
+}
+
+function hideMysticModal() {
+  selectors.mysticModal?.classList.add("hidden");
+}
+
+function setMysticStatusMessage(message) {
+  if (selectors.mysticStatus) {
+    selectors.mysticStatus.textContent = message;
+  }
+}
+
+function resetMysticEffects() {
+  state.mysticEffects = createMysticEffectsState();
+}
+
+function getMysticTargetPlayer(fallbackToLeader = true) {
+  const targetId = state.mysticPauseContext?.playerId;
+  if (targetId) {
+    const target = state.players.find((player) => player.id === targetId);
+    if (target) {
+      return target;
+    }
+  }
+  if (fallbackToLeader) {
+    const [leader] = getPlayersByStanding();
+    if (leader) {
+      return leader;
+    }
+  }
+  return null;
+}
+
+function getLapDistance() {
+  const laps = Math.max(DEFAULT_LAPS_REQUIRED, state.lapsRequired || DEFAULT_LAPS_REQUIRED);
+  const totalRaceDistance = state.totalRaceDistance ?? getRaceDistance(state.lapsRequired);
+  return laps > 0 ? totalRaceDistance / laps : totalRaceDistance;
+}
+
+function adjustPlayerDistance(player, deltaDistance = 0) {
+  if (!player || !Number.isFinite(deltaDistance)) {
+    return null;
+  }
+  const totalRaceDistance = state.totalRaceDistance ?? getRaceDistance(state.lapsRequired);
+  const nextDistance = clamp((player.distance ?? 0) + deltaDistance, 0, totalRaceDistance);
+  player.distance = nextDistance;
+  applyLapMetricsToPlayer(player, player.distance);
+  updateHorsePosition(player);
+  updateCentralLapIndicator();
+  const orderedPlayers = getPlayersByStanding();
+  updateRunnerStackingOrder(orderedPlayers);
+  updateRosterOrder(orderedPlayers);
+  if (state.mode === ClientMode.HOST && state.sessionId) {
+    updateSessionPatch({
+      [`players/${player.id}/distance`]: Number(player.distance.toFixed(4)),
+    });
+  }
+  maybeResolveCheerRevert(player);
+  return nextDistance;
+}
+
+function applyCheerDelta(player, delta = 0) {
+  if (!player || !Number.isFinite(delta) || delta === 0) {
+    return player?.cheerCount ?? 0;
+  }
+  player.cheerCount = (player.cheerCount ?? 0) + delta;
+  if (player.elements?.cheerBadge) {
+    player.elements.cheerBadge.textContent = `🎉 ${player.cheerCount ?? 0}`;
+  }
+  const refs = state.cheerButtonRefs.get(player.id);
+  if (refs?.countLabel) {
+    refs.countLabel.textContent = String(player.cheerCount ?? 0);
+  }
+  if (state.mode === ClientMode.HOST && state.sessionId) {
+    updateSessionPatch({
+      [`players/${player.id}/cheerCount`]: player.cheerCount ?? 0,
+    });
+  }
+  return player.cheerCount;
+}
+
+function queueCheerRevert(player, delta) {
+  if (!player || delta === 0) {
+    return;
+  }
+  const pendingLap = (player.lapsCompleted ?? 0) + 1;
+  const existing = state.mysticEffects.cheerReverts.get(player.id);
+  const combinedDelta = (existing?.delta ?? 0) + delta;
+  if (combinedDelta === 0) {
+    state.mysticEffects.cheerReverts.delete(player.id);
+    return;
+  }
+  state.mysticEffects.cheerReverts.set(player.id, {
+    delta: combinedDelta,
+    targetLap: pendingLap,
+  });
+}
+
+function maybeResolveCheerRevert(player) {
+  if (!player) {
+    return;
+  }
+  const entry = state.mysticEffects.cheerReverts.get(player.id);
+  if (!entry) {
+    return;
+  }
+  if ((player.lapsCompleted ?? 0) >= entry.targetLap) {
+    applyCheerDelta(player, -entry.delta);
+    state.mysticEffects.cheerReverts.delete(player.id);
+    updateCasterText(
+      `<span class="caster-name">${player.name}</span> 선수의 응원 점수가 원래대로 돌아갑니다.`,
+      { lock: 800 },
+    );
+  }
+}
+
+function addFreezeEffect(playerId, durationMs = MYSTIC_FREEZE_DURATION_MS) {
+  if (!playerId) {
+    return null;
+  }
+  const ticks = Math.max(1, Math.round(durationMs / TICK_MS));
+  state.mysticEffects.freeze.set(playerId, {
+    ticksRemaining: ticks,
+    totalTicks: ticks,
+  });
+  return ticks;
+}
+
+function addBoostEffect(playerId, durationMs = MYSTIC_BOOST_DURATION_MS, multiplier = MYSTIC_BOOST_MULTIPLIER) {
+  if (!playerId) {
+    return null;
+  }
+  const ticks = Math.max(1, Math.round(durationMs / TICK_MS));
+  state.mysticEffects.boost.set(playerId, {
+    ticksRemaining: ticks,
+    totalTicks: ticks,
+    multiplier,
+  });
+  return ticks;
+}
+
+function startMysticSlotSequence(player) {
+  state.mysticSelection = null;
+  state.mysticSlotCurrentIndex = 0;
+  clearMysticSlotEngines();
+  const playerName = player?.name ?? null;
+  showMysticModal(playerName);
+  updateMysticSlotCellsFromIndex(state.mysticSlotCurrentIndex);
+
+  const options = getMysticEffectOptions();
+  if (options.length === 0) {
+    if (selectors.mysticResult) {
+      selectors.mysticResult.textContent = "No mystic options configured.";
+    }
+    selectors.mysticContinue?.removeAttribute("disabled");
+    return;
+  }
+
+  state.mysticSlotIntervalId = globalThis.setInterval(() => {
+    state.mysticSlotCurrentIndex = (state.mysticSlotCurrentIndex + 1) % options.length;
+    updateMysticSlotCellsFromIndex(state.mysticSlotCurrentIndex);
+  }, 120);
+
+  state.mysticSlotTimeoutId = globalThis.setTimeout(() => {
+    completeMysticSlotSequence();
+  }, 2600);
+}
+
+function completeMysticSlotSequence() {
+  if (!state.mysticPauseActive) {
+    clearMysticSlotEngines();
+    return;
+  }
+  clearMysticSlotEngines();
+  const options = getMysticEffectOptions();
+  if (options.length === 0) {
+    if (selectors.mysticResult) {
+      selectors.mysticResult.textContent = "No mystic options available.";
+    }
+    selectors.mysticContinue?.removeAttribute("disabled");
+    return;
+  }
+  const choice = options[Math.floor(Math.random() * options.length)];
+  state.mysticSelection = choice.id;
+  showMysticSlotResult(choice);
+  const baseNarration = `${choice.title} – ${choice.description}`;
+  if (selectors.mysticResult) {
+    selectors.mysticResult.textContent = baseNarration;
+  }
+  selectors.mysticContinue?.removeAttribute("disabled");
+  selectors.mysticContinue?.focus();
+  setMysticStatusMessage(`${choice.title} 발동 준비 완료`);
+
+  if (state.mode === ClientMode.SPECTATOR) {
+    setSpectatorStatus(`"${choice.title}" 효과 선택! 호스트가 진행을 재개하면 발동합니다.`);
+  }
+
+  const announcerMessage = `Mystic fate has spoken! <span class="caster-name">${choice.title}</span> 효과가 선택되었습니다!`;
+  updateCasterText(announcerMessage, { force: true, lock: 1800 });
+
+  logSession("mystic:choice", {
+    option: choice.id,
+    playerId: state.mysticPauseContext?.playerId ?? null,
+    tick: state.mysticPauseContext?.pausedAtTick ?? state.tick,
+  });
+  const effectOutcome = applyMysticEffect(choice);
+  if (effectOutcome && selectors.mysticResult) {
+    selectors.mysticResult.textContent = `${baseNarration} ${effectOutcome}`;
+  }
+}
+
+function applyMysticEffect(choice) {
+  if (!choice || !choice.id) {
+    return "";
+  }
+  switch (choice.id) {
+    case "swap_positions":
+      return applyMysticEffectSwapPositions();
+    case "freeze_leader":
+      return applyMysticEffectFreezeLeader();
+    case "boost_leader":
+      return applyMysticEffectBoostLeader();
+    case "cheer_plus":
+      return applyMysticEffectCheerDelta(20);
+    case "cheer_minus":
+      return applyMysticEffectCheerDelta(-20);
+    case "no_effect":
+      return applyMysticEffectNoop();
+    case "jump_forward":
+      return applyMysticEffectJump(0.07);
+    case "jump_backward":
+      return applyMysticEffectJump(-0.07);
+    case "freeze_top_three":
+      return applyMysticEffectFreezeTopThree();
+    default:
+      return "";
+  }
+}
+
+function applyMysticEffectSwapPositions() {
+  const ordered = getPlayersByStanding();
+  if (ordered.length < 2) {
+    return "효과를 적용할 선수가 부족합니다.";
+  }
+  const leader = ordered[0];
+  const tail = ordered[ordered.length - 1];
+  if (!leader || !tail || leader.id === tail.id) {
+    return "효과를 적용할 선수가 부족합니다.";
+  }
+
+  const leaderDistance = leader.distance ?? 0;
+  const tailDistance = tail.distance ?? 0;
+  leader.distance = tailDistance;
+  tail.distance = leaderDistance;
+  applyLapMetricsToPlayer(leader, leader.distance);
+  applyLapMetricsToPlayer(tail, tail.distance);
+  maybeResolveCheerRevert(leader);
+  maybeResolveCheerRevert(tail);
+  updateHorsePosition(leader);
+  updateHorsePosition(tail);
+
+  const reordered = getPlayersByStanding();
+  updateRunnerStackingOrder(reordered);
+  updateRosterOrder(reordered);
+  updateCentralLapIndicator();
+
+  if (state.mode === ClientMode.HOST && state.sessionId) {
+    const patch = {};
+    patch[`players/${leader.id}/distance`] = Number(leader.distance.toFixed(4));
+    patch[`players/${tail.id}/distance`] = Number(tail.distance.toFixed(4));
+    updateSessionPatch(patch);
+  }
+
+  updateCasterText(
+    `운명 전환! <span class="caster-name">${leader.name}</span> 선수와 <span class="caster-name">${tail.name}</span> 선수의 위치가 서로 뒤바뀝니다!`,
+    { force: true, lock: 1600 },
+  );
+  logSession("mystic:swap", {
+    leaderId: leader.id,
+    leaderName: leader.name,
+    tailId: tail.id,
+    tailName: tail.name,
+  });
+  return `${leader.name} ↔ ${tail.name}`;
+}
+
+function applyMysticEffectFreezeLeader(durationMs = MYSTIC_FREEZE_DURATION_MS) {
+  const [leader] = getPlayersByStanding();
+  if (!leader) {
+    return "적용할 선수가 없습니다.";
+  }
+  const ticks = addFreezeEffect(leader.id, durationMs);
+  const secondsLabel = formatSeconds(durationMs);
+  updateCasterText(
+    `선두 봉인! <span class="caster-name">${leader.name}</span> 선수가 ${secondsLabel}초 동안 움직이지 못합니다!`,
+    { force: true, lock: 1500 },
+  );
+  logSession("mystic:freeze", { playerId: leader.id, ticks });
+  return `${leader.name} 선수가 ${secondsLabel}초 동안 정지됩니다.`;
+}
+
+function applyMysticEffectBoostLeader(durationMs = MYSTIC_BOOST_DURATION_MS) {
+  const [leader] = getPlayersByStanding();
+  if (!leader) {
+    return "적용할 선수가 없습니다.";
+  }
+  const ticks = addBoostEffect(leader.id, durationMs, MYSTIC_BOOST_MULTIPLIER);
+  const secondsLabel = formatSeconds(durationMs);
+  updateCasterText(
+    `아케인 부스트! <span class="caster-name">${leader.name}</span> 선수가 ${secondsLabel}초 동안 가속합니다!`,
+    { force: true, lock: 1500 },
+  );
+  logSession("mystic:boost", { playerId: leader.id, ticks, multiplier: MYSTIC_BOOST_MULTIPLIER });
+  return `${leader.name} 선수가 ${secondsLabel}초 동안 가속합니다.`;
+}
+
+function applyMysticEffectCheerDelta(delta) {
+  const target = getMysticTargetPlayer();
+  if (!target) {
+    return "적용할 선수가 없습니다.";
+  }
+  applyCheerDelta(target, delta);
+  queueCheerRevert(target, delta);
+  const action = delta > 0 ? "증가" : "감소";
+  const magnitude = Math.abs(delta);
+  updateCasterText(
+    `<span class="caster-name">${target.name}</span> 선수의 응원 점수가 ${action}합니다! (±${magnitude}, 이번 랩 종료 후 원복)`,
+    { force: true, lock: 1400 },
+  );
+  logSession("mystic:cheer-delta", {
+    playerId: target.id,
+    delta,
+    pendingLap: (target.lapsCompleted ?? 0) + 1,
+  });
+  return `${target.name} 선수의 응원 점수가 ${delta > 0 ? "+" : ""}${delta} 되었습니다.`;
+}
+
+function applyMysticEffectNoop() {
+  updateCasterText("신비한 기운이 가라앉았습니다. 아무 일도 일어나지 않습니다!", {
+    force: true,
+    lock: 1200,
+  });
+  logSession("mystic:no-effect");
+  return "아무 변화가 없습니다.";
+}
+
+function applyMysticEffectJump(fraction = 0.07) {
+  const target = getMysticTargetPlayer();
+  if (!target) {
+    return "적용할 선수가 없습니다.";
+  }
+  const lapDistance = getLapDistance();
+  if (!Number.isFinite(lapDistance) || lapDistance <= 0) {
+    return "조정할 거리가 없습니다.";
+  }
+  const deltaDistance = lapDistance * fraction;
+  if (deltaDistance === 0) {
+    return "변화가 없습니다.";
+  }
+  adjustPlayerDistance(target, deltaDistance);
+
+  const directionText = deltaDistance > 0 ? "앞으로" : "뒤로";
+  const percentLabel = Math.abs(fraction * 100).toFixed(1).replace(/\.0$/, "");
+  updateCasterText(
+    `<span class="caster-name">${target.name}</span> 선수가 트랙 위에서 ${directionText} ${percentLabel}% 만큼 순간이동합니다!`,
+    { force: true, lock: 1400 },
+  );
+  logSession("mystic:jump", {
+    playerId: target.id,
+    deltaDistance,
+    fraction,
+  });
+  return `${target.name} 선수가 ${directionText} ${percentLabel}% 이동했습니다.`;
+}
+
+function applyMysticEffectFreezeTopThree(durationMs = MYSTIC_FREEZE_DURATION_MS) {
+  const contenders = getPlayersByStanding().slice(0, 3);
+  if (contenders.length === 0) {
+    return "적용할 선수가 없습니다.";
+  }
+  contenders.forEach((player) => {
+    addFreezeEffect(player.id, durationMs);
+  });
+  const names = contenders.map((player) => `<span class="caster-name">${player.name}</span>`).join(", ");
+  const secondsLabel = formatSeconds(durationMs);
+  updateCasterText(`같이 죽자! ${names} 선수가 ${secondsLabel}초 동안 움직이지 못합니다!`, {
+    force: true,
+    lock: 1600,
+  });
+  logSession("mystic:freeze-top-three", {
+    playerIds: contenders.map((player) => player.id),
+    durationMs,
+  });
+  return `상위 ${contenders.length}명의 선수가 ${secondsLabel}초 동안 정지합니다.`;
+}
+
+function isPlayerFrozen(player) {
+  if (!player) {
+    return false;
+  }
+  const entry = state.mysticEffects?.freeze?.get(player.id);
+  return Boolean(entry && entry.ticksRemaining > 0);
+}
+
+function getPlayerBoostMultiplier(player) {
+  if (!player) {
+    return 1;
+  }
+  const entry = state.mysticEffects?.boost?.get(player.id);
+  if (entry && Number.isFinite(entry.ticksRemaining) && entry.ticksRemaining > 0) {
+    return Number.isFinite(entry.multiplier) ? entry.multiplier : MYSTIC_BOOST_MULTIPLIER;
+  }
+  return 1;
+}
+
+function decrementMysticEffectTimers() {
+  const expiredFreeze = [];
+  state.mysticEffects.freeze.forEach((entry, playerId) => {
+    entry.ticksRemaining -= 1;
+    if (entry.ticksRemaining <= 0) {
+      expiredFreeze.push(playerId);
+    }
+  });
+  expiredFreeze.forEach((playerId) => {
+    const player = state.players.find((p) => p.id === playerId);
+    updateCasterText(
+      `<span class="caster-name">${player?.name ?? "선수"}</span>의 봉인이 해제됩니다!`,
+      { lock: 900, force: true },
+    );
+    state.mysticEffects.freeze.delete(playerId);
+  });
+
+  const expiredBoost = [];
+  state.mysticEffects.boost.forEach((entry, playerId) => {
+    entry.ticksRemaining -= 1;
+    if (entry.ticksRemaining <= 0) {
+      expiredBoost.push(playerId);
+    }
+  });
+  expiredBoost.forEach((playerId) => {
+    const player = state.players.find((p) => p.id === playerId);
+    updateCasterText(
+      `<span class="caster-name">${player?.name ?? "선수"}</span>의 아케인 부스트가 사라집니다.`,
+      { lock: 900 },
+    );
+    state.mysticEffects.boost.delete(playerId);
+  });
+}
+
+function pauseRaceForMysticPoint(player) {
+  if (state.mysticPauseActive || state.raceStatus !== "running") {
+    return;
+  }
+
+  const pausedDistance =
+    player && Number.isFinite(player.distance) ? Number(player.distance.toFixed(4)) : null;
+  const triggeredByPlayerId = player?.id ?? null;
+  const triggeredByPlayerName = player?.name ?? null;
+
+  state.mysticPauseActive = true;
+  state.mysticPauseContext = {
+    playerId: triggeredByPlayerId,
+    playerName: triggeredByPlayerName,
+    pausedAtTick: state.tick,
+    pausedAtDistance: pausedDistance,
+  };
+  state.raceStatus = "mystic-pause";
+
+  stopRaceLoop();
+  pauseRaceTimer();
+
+  const casterName = triggeredByPlayerName ?? "정체불명";
+  updateCasterText(
+    `미스틱 포인트 발동! <span class="caster-name">${casterName}</span> 선수가 운명의 지점을 통과하며 경기가 일시 중단됩니다.`,
+    { force: true, lock: 2000 },
+  );
+
+  if (state.mode === ClientMode.SPECTATOR) {
+    setSpectatorStatus("Mystic point reached! Waiting for destiny to decide the boost…");
+  }
+
+  if (state.mode === ClientMode.HOST && state.sessionId) {
+    const payload = {
+      status: "mystic-pause",
+      mysticPause: {
+        playerId: triggeredByPlayerId,
+        playerName: triggeredByPlayerName,
+        tick: state.tick,
+      },
+    };
+    if (pausedDistance != null) {
+      payload.mysticPause.distance = pausedDistance;
+    }
+    updateSessionPatch(payload);
+  }
+
+  logSession("mystic:pause", {
+    playerId: triggeredByPlayerId,
+    playerName: triggeredByPlayerName,
+    tick: state.tick,
+    distance: pausedDistance,
+  });
+
+  startMysticSlotSequence(player);
+}
+
+function resumeRaceAfterMysticPoint({ announce = true } = {}) {
+  if (!state.mysticPauseActive) {
+    return false;
+  }
+
+  const context = state.mysticPauseContext;
+  state.mysticPauseActive = false;
+  state.mysticPauseContext = null;
+  clearMysticSlotEngines();
+  hideMysticModal();
+
+  if (announce) {
+    updateCasterText("미스틱 포인트의 심판이 끝났습니다! 경기가 다시 시작됩니다!", {
+      force: true,
+      lock: 1200,
+    });
+  }
+  if (state.mode === ClientMode.SPECTATOR) {
+    setSpectatorStatus("Mystic ritual complete! Race resumed.");
+  }
+
+  resumeRaceTimer();
+  startRaceLoop();
+
+  if (state.mode === ClientMode.HOST && state.sessionId) {
+    updateSessionPatch({ status: "running", mysticPause: null });
+  }
+
+  logSession("mystic:resume", {
+    resumedAtTick: state.tick,
+    pausedPlayerId: context?.playerId ?? null,
+  });
+  return true;
 }
 
 function getPlayerInitial(name) {
@@ -1241,6 +1942,8 @@ async function cleanupSession({ reason = "manual", publish = true, resetUi = tru
     stopRaceTimer();
     clearPlayersSubscription();
     stopSessionBroadcastLoop();
+    clearMysticSlotEngines();
+    hideMysticModal();
 
     if (hadSession && publish) {
       publishBus("session-finished", { sessionId: activeSessionId });
@@ -1278,6 +1981,10 @@ async function cleanupSession({ reason = "manual", publish = true, resetUi = tru
     state.tick = 0;
     state.rng = null;
     state.seed = null;
+    state.mysticPauseActive = false;
+    state.mysticPauseContext = null;
+    state.mysticSelection = null;
+    resetMysticEffects();
     state.totalRaceDistance = getRaceDistance(state.lapsRequired);
     state.cheerButtonRefs.clear();
     state.casterAnnouncements.clear();
@@ -1358,6 +2065,11 @@ function getNowMs() {
   return Date.now();
 }
 
+function formatSeconds(durationMs = 0) {
+  const seconds = Math.max(0, durationMs / 1_000);
+  return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1);
+}
+
 function formatRaceTimerValue(elapsedMs = 0) {
   const safeElapsed = Math.max(0, Math.floor(elapsedMs));
   const minutes = Math.floor(safeElapsed / 60_000);
@@ -1394,6 +2106,24 @@ function updateFirstPlaceTimeDisplay() {
   selectors.firstPlaceTime.classList.remove("hidden");
 }
 
+function clearRaceTimerInterval() {
+  if (state.raceTimerIntervalId !== null) {
+    globalThis.clearInterval(state.raceTimerIntervalId);
+    state.raceTimerIntervalId = null;
+  }
+}
+
+function bindRaceTimerInterval() {
+  clearRaceTimerInterval();
+  state.raceTimerIntervalId = globalThis.setInterval(() => {
+    if (state.raceTimerStartTime == null) {
+      return;
+    }
+    state.raceTimerElapsedMs = getNowMs() - state.raceTimerStartTime;
+    updateRaceTimerDisplay(state.raceTimerElapsedMs);
+  }, RACE_TIMER_INTERVAL_MS);
+}
+
 function stopRaceTimer() {
   if (state.raceTimerIntervalId !== null) {
     globalThis.clearInterval(state.raceTimerIntervalId);
@@ -1419,19 +2149,30 @@ function resetRaceTimer() {
 }
 
 function startRaceTimer() {
-  if (state.raceTimerIntervalId !== null) {
-    globalThis.clearInterval(state.raceTimerIntervalId);
-  }
   state.raceTimerElapsedMs = 0;
   state.raceTimerStartTime = getNowMs();
   updateRaceTimerDisplay(0);
-  state.raceTimerIntervalId = globalThis.setInterval(() => {
-    if (state.raceTimerStartTime == null) {
-      return;
-    }
+  bindRaceTimerInterval();
+}
+
+function pauseRaceTimer() {
+  if (state.raceTimerStartTime == null && state.raceTimerIntervalId === null) {
+    return;
+  }
+  if (state.raceTimerStartTime != null) {
     state.raceTimerElapsedMs = getNowMs() - state.raceTimerStartTime;
-    updateRaceTimerDisplay(state.raceTimerElapsedMs);
-  }, RACE_TIMER_INTERVAL_MS);
+    state.raceTimerStartTime = null;
+  }
+  clearRaceTimerInterval();
+  updateRaceTimerDisplay(state.raceTimerElapsedMs);
+}
+
+function resumeRaceTimer() {
+  if (state.raceTimerStartTime != null) {
+    return;
+  }
+  state.raceTimerStartTime = getNowMs() - Math.max(0, state.raceTimerElapsedMs ?? 0);
+  bindRaceTimerInterval();
 }
 
 function updateCountdownDisplay(value) {
@@ -1664,7 +2405,9 @@ function performRaceTick() {
 
   let announcementMade = false;
 
-  state.players.forEach((player) => {
+  let tickInterrupted = false;
+
+  for (const player of state.players) {
     if (player.finished) {
       tickSummary.push({
         playerId: player.id,
@@ -1674,17 +2417,31 @@ function performRaceTick() {
         lap: player.lapsCompleted,
         lapProgress: Number(player.lapProgress.toFixed(4)),
       });
-      return;
+      continue;
+    }
+
+    if (isPlayerFrozen(player)) {
+      tickSummary.push({
+        playerId: player.id,
+        name: player.name,
+        distance: Number(player.distance.toFixed(4)),
+        frozen: true,
+        lap: player.lapsCompleted + 1,
+        lapProgress: Number(player.lapProgress.toFixed(4)),
+      });
+      continue;
     }
 
     const baseStep = 0.01 + state.rng() * 0.03;
     const cheerBoost = player.cheerCount * CHEER_BOOST_FACTOR;
+    const boostMultiplier = getPlayerBoostMultiplier(player);
     const remainingDistance = Math.max(0, totalRaceDistance - player.distance);
-    const totalStep = Math.min(baseStep + cheerBoost, remainingDistance);
+    const totalStep = Math.min((baseStep + cheerBoost) * boostMultiplier, remainingDistance);
 
     player.distance = Math.min(totalRaceDistance, player.distance + totalStep);
 
     const lapMetrics = applyLapMetricsToPlayer(player);
+    maybeResolveCheerRevert(player);
     const checkpointActivated = maybeActivatePendingFantasyCheckpoint(player);
     const checkpointTriggered = maybeHandleFantasyCheckpoint(player);
 
@@ -1741,6 +2498,7 @@ function performRaceTick() {
       name: player.name,
       baseStep: Number(baseStep.toFixed(4)),
       cheerBoost: Number(cheerBoost.toFixed(4)),
+      boostMultiplier: Number(boostMultiplier.toFixed(2)),
       totalStep: Number(totalStep.toFixed(4)),
       distance: Number(player.distance.toFixed(4)),
       lap: player.lapsCompleted + 1,
@@ -1749,8 +2507,16 @@ function performRaceTick() {
     });
     if (checkpointTriggered) {
       announcementMade = true;
+      if (state.mysticPauseActive) {
+        tickInterrupted = true;
+      }
     }
-  });
+    if (tickInterrupted) {
+      break;
+    }
+  }
+
+  decrementMysticEffectTimers();
 
   const orderedPlayers = getPlayersByStanding();
   const newRanking = orderedPlayers.map((p) => p.id);
@@ -1863,6 +2629,12 @@ function performRaceTick() {
 
 function finishRace() {
   state.raceStatus = "finished";
+  state.mysticPauseActive = false;
+  state.mysticPauseContext = null;
+  state.mysticSelection = null;
+  resetMysticEffects();
+  clearMysticSlotEngines();
+  hideMysticModal();
   stopRaceLoop();
   stopRaceTimer();
   updateFirstPlaceTimeDisplay();
@@ -2076,7 +2848,8 @@ function parsePlayerNames(rawValue) {
 
 async function handleStart(event) {
   event.preventDefault();
-  if (["pending", "countdown", "running"].includes(state.raceStatus)) {
+  const activeStatuses = ["pending", "countdown", "running", "mystic-pause"];
+  if (activeStatuses.includes(state.raceStatus)) {
     return;
   }
 
@@ -2098,6 +2871,12 @@ async function handleStart(event) {
   clearPlayersSubscription();
   stopSessionBroadcastLoop();
   clearCasterText();
+  state.mysticPauseActive = false;
+  state.mysticPauseContext = null;
+  state.mysticSelection = null;
+  resetMysticEffects();
+  clearMysticSlotEngines();
+  hideMysticModal();
   state.casterAnnouncements.clear();
   state.previousRanking = [];
   state.casterLock = false;
@@ -2183,6 +2962,13 @@ function registerEventListeners() {
     await cleanupSession({ reason: "results-close" });
     clearCasterText();
     logSession("results:closed");
+  });
+  selectors.mysticContinue?.addEventListener("click", () => {
+    if (selectors.mysticContinue?.hasAttribute("disabled")) {
+      return;
+    }
+    hideMysticModal();
+    resumeRaceAfterMysticPoint({ announce: true });
   });
 
   if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
@@ -2270,6 +3056,7 @@ const __TEST_ONLY__ = {
   generatePlayerColor,
   sanitizeLapCount,
   getRaceDistance,
+  resumeRaceAfterMysticPoint,
 };
 
 export {
@@ -2291,6 +3078,7 @@ export {
   logTick,
   parsePlayerNames,
   progressToAngle,
+  resumeRaceAfterMysticPoint,
   renderRaceScene,
   scheduleCountdown,
   state,
