@@ -298,6 +298,41 @@ function normalizeRadians(angle) {
   return normalized;
 }
 
+function updateViewportHeightVariable() {
+  if (typeof document === "undefined" || typeof window === "undefined") {
+    return;
+  }
+  const viewport = window.visualViewport;
+  const rawHeight = Number.isFinite(viewport?.height)
+    ? viewport.height
+    : window.innerHeight || document.documentElement?.clientHeight || 0;
+  if (!Number.isFinite(rawHeight) || rawHeight <= 0) {
+    return;
+  }
+  const root = document.documentElement;
+  if (!root || !root.style || typeof root.style.setProperty !== "function") {
+    return;
+  }
+  root.style.setProperty("--app-vh", `${rawHeight * 0.01}px`);
+}
+
+function bindViewportHeightListener() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const handler = () => {
+    requestFrame(() => {
+      updateViewportHeightVariable();
+    });
+  };
+  updateViewportHeightVariable();
+  window.addEventListener("resize", handler, { passive: true });
+  window.addEventListener("orientationchange", handler, { passive: true });
+  if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
+    window.visualViewport.addEventListener("resize", handler, { passive: true });
+  }
+}
+
 function getRaceDistance(laps = DEFAULT_LAPS_REQUIRED) {
   const safeLaps = Math.max(DEFAULT_LAPS_REQUIRED, Math.floor(laps) || DEFAULT_LAPS_REQUIRED);
   return BASE_LAP_DISTANCE * safeLaps;
@@ -3087,6 +3122,7 @@ function init() {
   }
 
   setupBroadcastChannel();
+  bindViewportHeightListener();
   registerEventListeners();
   applyFantasyMode(state.fantasyMode);
   selectors.countdownModal?.classList.add("hidden");
